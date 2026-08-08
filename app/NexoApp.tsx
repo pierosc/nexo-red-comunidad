@@ -19,8 +19,12 @@ import {
   CircleUserRound,
   Home,
   Link2,
+  LocateFixed,
   MapPin,
+  Minus,
+  Move,
   Network,
+  Plus,
   Save,
   Search,
   ShieldCheck,
@@ -30,7 +34,16 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  type CSSProperties,
+  type FormEvent,
+  type PointerEvent as ReactPointerEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 type View = "home" | "directory" | "connections" | "profile";
 
@@ -65,10 +78,11 @@ type ProfileDraft = Pick<
   | "enrolled_by_id"
 >;
 
-const env = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env ?? {};
-const clerkKey = env.VITE_CLERK_PUBLISHABLE_KEY ?? "";
-const supabaseUrl = env.VITE_SUPABASE_URL ?? "";
-const supabaseKey = env.VITE_SUPABASE_PUBLISHABLE_KEY ?? "";
+export type NexoConfig = {
+  clerkPublishableKey: string;
+  supabaseUrl: string;
+  supabasePublishableKey: string;
+};
 
 const demoProfiles: Profile[] = [
   {
@@ -251,21 +265,21 @@ function Avatar({ profile, size = "medium" }: { profile: Profile; size?: "small"
   );
 }
 
-function createSupabase(getToken: () => Promise<string | null>): SupabaseClient | null {
-  if (!supabaseUrl || !supabaseKey) return null;
-  return createClient(supabaseUrl, supabaseKey, {
+function createSupabase(config: NexoConfig, getToken: () => Promise<string | null>): SupabaseClient | null {
+  if (!config.supabaseUrl || !config.supabasePublishableKey) return null;
+  return createClient(config.supabaseUrl, config.supabasePublishableKey, {
     accessToken: async () => getToken(),
   });
 }
 
-function useProfiles(userId: string, getToken?: () => Promise<string | null>) {
-  const live = Boolean(supabaseUrl && supabaseKey && getToken);
+function useProfiles(userId: string, config: NexoConfig, getToken?: () => Promise<string | null>) {
+  const live = Boolean(config.supabaseUrl && config.supabasePublishableKey && getToken);
   const [profiles, setProfiles] = useState<Profile[]>(demoProfiles);
   const [loading, setLoading] = useState(live);
   const [error, setError] = useState<string | null>(null);
   const client = useMemo(
-    () => (getToken ? createSupabase(getToken) : null),
-    [getToken],
+    () => (getToken ? createSupabase(config, getToken) : null),
+    [config, getToken],
   );
 
   const refresh = useCallback(async () => {
@@ -332,11 +346,18 @@ function useProfiles(userId: string, getToken?: () => Promise<string | null>) {
   return { profiles, loading, error, live, saveProfile };
 }
 
-export default function NexoApp() {
-  if (clerkKey) {
+export default function NexoApp({ config }: { config: NexoConfig }) {
+  if (config.clerkPublishableKey) {
     return (
-      <ClerkProvider publishableKey={clerkKey} signInFallbackRedirectUrl="/" signUpFallbackRedirectUrl="/">
-        <ClerkExperience />
+      <ClerkProvider
+        publishableKey={config.clerkPublishableKey}
+        signInFallbackRedirectUrl="/"
+        signUpFallbackRedirectUrl="/"
+        appearance={{
+          variables: { colorPrimary: "#e36b52", colorText: "#182b3a", borderRadius: "0.65rem" },
+        }}
+      >
+        <ClerkExperience config={config} />
       </ClerkProvider>
     );
   }
@@ -344,7 +365,7 @@ export default function NexoApp() {
   return <DemoExperience />;
 }
 
-function ClerkExperience() {
+function ClerkExperience({ config }: { config: NexoConfig }) {
   const { isLoaded, isSignedIn, userId, getToken } = useAuth();
   const { user } = useUser();
 
@@ -369,6 +390,7 @@ function ClerkExperience() {
       userName={user?.fullName ?? user?.firstName ?? "Miembro"}
       userImage={user?.imageUrl}
       getToken={getToken}
+      config={config}
       accountControl={<UserButton />}
     />
   );
@@ -395,6 +417,7 @@ function DemoExperience() {
       userId="demo_piero"
       userName="Piero Gutiérrez"
       userImage={demoProfiles[0].photo_url ?? undefined}
+      config={{ clerkPublishableKey: "", supabaseUrl: "", supabasePublishableKey: "" }}
       accountControl={<button className="demo-avatar" onClick={() => setEntered(false)} aria-label="Salir de la demo">PG</button>}
     />
   );
@@ -482,15 +505,17 @@ function Workspace({
   userName,
   userImage,
   getToken,
+  config,
   accountControl,
 }: {
   userId: string;
   userName: string;
   userImage?: string;
   getToken?: () => Promise<string | null>;
+  config: NexoConfig;
   accountControl: React.ReactNode;
 }) {
-  const { profiles, loading, error, live, saveProfile } = useProfiles(userId, getToken);
+  const { profiles, loading, error, live, saveProfile } = useProfiles(userId, config, getToken);
   const [view, setView] = useState<View>("home");
   const [query, setQuery] = useState("");
   const [cohort, setCohort] = useState("Todas");
@@ -563,7 +588,7 @@ function Workspace({
           </div>
         </header>
 
-        <main className="content">
+        <main className={`content ${view === "connections" ? "content-connections" : ""}`}>
           {error && <div className="error-banner">{error}</div>}
           {view === "home" && (
             <Dashboard
@@ -695,23 +720,229 @@ function Directory({ profiles, cohorts, cohort, query, onQuery, onCohort, onOpen
   );
 }
 
-function Connections({ profile, profiles, onOpen }: { profile: Profile; profiles: Profile[]; onOpen: (profile: Profile) => void }) {
+type NetworkRelation = "self" | "mentor" | "child" | "sibling" | "grandchild";
+
+type NetworkPoint = {
+  profile: Profile;
+  relation: NetworkRelation;
+  x: number;
+  y: number;
+  delay: number;
+};
+
+type NetworkEdge = {
+  from: NetworkPoint;
+  to: NetworkPoint;
+  tone: "primary" | "secondary";
+};
+
+function buildLivingNetwork(profile: Profile, profiles: Profile[]) {
+  const points: NetworkPoint[] = [{ profile, relation: "self", x: 0, y: 0, delay: 0 }];
+  const edges: NetworkEdge[] = [];
   const mentor = profiles.find((person) => person.id === profile.enrolled_by_id);
-  const enrolled = profiles.filter((person) => person.enrolled_by_id === profile.id);
+  const directChildren = profiles.filter((person) => person.enrolled_by_id === profile.id);
+
+  let mentorPoint: NetworkPoint | undefined;
+  if (mentor) {
+    mentorPoint = { profile: mentor, relation: "mentor", x: 0, y: -285, delay: 1 };
+    points.push(mentorPoint);
+    edges.push({ from: mentorPoint, to: points[0], tone: "primary" });
+
+    const siblings = profiles.filter(
+      (person) => person.enrolled_by_id === mentor.id && person.id !== profile.id,
+    );
+    siblings.slice(0, 3).forEach((person, index) => {
+      const side = index % 2 === 0 ? 1 : -1;
+      const point: NetworkPoint = {
+        profile: person,
+        relation: "sibling",
+        x: side * (390 + Math.floor(index / 2) * 170),
+        y: -105 + Math.floor(index / 2) * 125,
+        delay: index + 2,
+      };
+      points.push(point);
+      edges.push({ from: mentorPoint as NetworkPoint, to: point, tone: "secondary" });
+    });
+  }
+
+  directChildren.slice(0, 4).forEach((person, index, list) => {
+    const gap = 330;
+    const point: NetworkPoint = {
+      profile: person,
+      relation: "child",
+      x: (index - (list.length - 1) / 2) * gap,
+      y: 285,
+      delay: index + 3,
+    };
+    points.push(point);
+    edges.push({ from: points[0], to: point, tone: "primary" });
+
+    profiles
+      .filter((candidate) => candidate.enrolled_by_id === person.id)
+      .slice(0, 2)
+      .forEach((grandchild, grandchildIndex) => {
+        const grandchildPoint: NetworkPoint = {
+          profile: grandchild,
+          relation: "grandchild",
+          x: point.x + (grandchildIndex === 0 ? 0 : 160),
+          y: 535,
+          delay: index + grandchildIndex + 5,
+        };
+        points.push(grandchildPoint);
+        edges.push({ from: point, to: grandchildPoint, tone: "secondary" });
+      });
+  });
+
+  return { points, edges, mentor, directChildren };
+}
+
+function LivingEdge({ edge, index }: { edge: NetworkEdge; index: number }) {
+  const dx = edge.to.x - edge.from.x;
+  const dy = edge.to.y - edge.from.y;
+  const distance = Math.sqrt(dx * dx + dy * dy);
+  const angle = Math.atan2(dy, dx) * (180 / Math.PI);
+  const style = {
+    "--edge-left": `calc(50% + ${edge.from.x}px)`,
+    "--edge-top": `calc(50% + ${edge.from.y}px)`,
+    "--edge-width": `${distance}px`,
+    "--edge-angle": `${angle}deg`,
+    "--edge-delay": `${index * -0.85}s`,
+  } as CSSProperties;
 
   return (
-    <div className="connections-page page-enter">
-      <div className="page-heading"><div><span className="page-kicker">TU MAPA</span><h1>Las personas que te conectan</h1><p>Cada línea cuenta cómo crece la comunidad, una persona a la vez.</p></div></div>
-      <section className="connection-map">
-        <div className="map-grid" />
-        {mentor && <button className="map-node mentor-node" onClick={() => onOpen(mentor)}><Avatar profile={mentor} size="large" /><span className="node-tag">TE ENROLÓ</span><strong>{mentor.full_name}</strong><small>{mentor.cohort}</small></button>}
-        <div className="map-line map-line-top" />
-        <button className="map-node center-node" onClick={() => onOpen(profile)}><Avatar profile={profile} size="hero" /><span className="node-tag">TÚ</span><strong>{profile.full_name}</strong><small>{profile.cohort}</small></button>
-        <div className="map-line map-line-bottom" />
-        <div className="child-nodes">
-          {enrolled.length ? enrolled.map((person) => <button key={person.id} className="map-node" onClick={() => onOpen(person)}><Avatar profile={person} size="medium" /><strong>{person.full_name}</strong><small>{person.cohort}</small></button>) : <div className="invite-node"><UserPlus /><strong>Tu red empieza aquí</strong><span>Invita a tu primera persona</span></div>}
+    <div className={`living-edge edge-${edge.tone}`} style={style} aria-hidden="true">
+      <span className="edge-energy" />
+      <span className="edge-energy edge-energy-two" />
+    </div>
+  );
+}
+
+function LivingNode({ point, onOpen }: { point: NetworkPoint; onOpen: (profile: Profile) => void }) {
+  const relationLabel: Record<NetworkRelation, string> = {
+    self: "TÚ",
+    mentor: "TE ENROLÓ",
+    child: "ENROLADO POR TI",
+    sibling: "MISMA RAMA",
+    grandchild: "SIGUIENTE GENERACIÓN",
+  };
+  const style = {
+    "--node-left": `calc(50% + ${point.x}px)`,
+    "--node-top": `calc(50% + ${point.y}px)`,
+    "--node-delay": `${point.delay * 90}ms`,
+    "--float-delay": `${point.delay * -0.7}s`,
+  } as CSSProperties;
+
+  return (
+    <button
+      className={`living-node living-node-${point.relation}`}
+      style={style}
+      type="button"
+      onClick={() => onOpen(point.profile)}
+    >
+      <span className="node-aura"><i /><i /><i /></span>
+      <Avatar profile={point.profile} size={point.relation === "self" ? "hero" : "large"} />
+      <span className="living-node-relation">{relationLabel[point.relation]}</span>
+      <strong>{point.profile.full_name}</strong>
+      <small>{point.profile.profession ?? point.profile.cohort}</small>
+      <span className="living-node-cohort">{point.profile.cohort}</span>
+    </button>
+  );
+}
+
+function Connections({ profile, profiles, onOpen }: { profile: Profile; profiles: Profile[]; onOpen: (profile: Profile) => void }) {
+  const network = useMemo(() => buildLivingNetwork(profile, profiles), [profile, profiles]);
+  const [zoom, setZoom] = useState(0.82);
+  const [pan, setPan] = useState({ x: 0, y: 35 });
+  const [dragging, setDragging] = useState(false);
+  const dragRef = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
+
+  const resetView = () => {
+    setZoom(0.82);
+    setPan({ x: 0, y: 35 });
+  };
+  const adjustZoom = (amount: number) => setZoom((current) => Math.min(1.35, Math.max(0.55, current + amount)));
+  const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if ((event.target as HTMLElement).closest(".living-node, .network-controls, .network-story-card")) return;
+    dragRef.current = { x: event.clientX, y: event.clientY, panX: pan.x, panY: pan.y };
+    setDragging(true);
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+  const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!dragRef.current) return;
+    setPan({
+      x: dragRef.current.panX + event.clientX - dragRef.current.x,
+      y: dragRef.current.panY + event.clientY - dragRef.current.y,
+    });
+  };
+  const endDrag = () => {
+    dragRef.current = null;
+    setDragging(false);
+  };
+
+  return (
+    <div className="connections-page living-connections page-enter">
+      <section
+        className={`living-canvas ${dragging ? "is-dragging" : ""}`}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        onWheel={(event) => adjustZoom(event.deltaY > 0 ? -0.06 : 0.06)}
+        aria-label="Mapa interactivo de conexiones"
+      >
+        <div className="living-grid" />
+        <div className="ambient-glow glow-coral" />
+        <div className="ambient-glow glow-sage" />
+        <div className="ambient-particle particle-one" />
+        <div className="ambient-particle particle-two" />
+        <div className="ambient-particle particle-three" />
+
+        <header className="living-header">
+          <div>
+            <span className="living-kicker"><Sparkles size={13} /> TU CONSTELACIÓN</span>
+            <h1>Tu árbol está <em>vivo.</em></h1>
+            <p>Arrastra para explorar · usa la rueda para acercarte · selecciona una persona para conocer su historia.</p>
+          </div>
+          <div className="living-count"><strong>{network.points.length}</strong><span>personas en<br />tu linaje</span></div>
+        </header>
+
+        <div className="network-controls" aria-label="Controles del mapa">
+          <button type="button" onClick={() => adjustZoom(0.12)} aria-label="Acercar"><Plus size={17} /></button>
+          <button type="button" onClick={() => adjustZoom(-0.12)} aria-label="Alejar"><Minus size={17} /></button>
+          <button type="button" onClick={resetView} aria-label="Centrar mapa"><LocateFixed size={17} /></button>
+          <span><Move size={14} /> {Math.round(zoom * 100)}%</span>
         </div>
-        <div className="map-caption"><span>{mentor ? 1 : 0}</span> persona te enroló <i /> <span>{enrolled.length}</span> personas enroladas por ti</div>
+
+        <div
+          className="living-world"
+          style={{
+            "--network-pan-x": `${pan.x}px`,
+            "--network-pan-y": `${pan.y}px`,
+            "--network-scale": zoom,
+          } as CSSProperties}
+        >
+          <div className="world-orbit orbit-one" />
+          <div className="world-orbit orbit-two" />
+          <div className="world-orbit orbit-three" />
+          {network.edges.map((edge, index) => <LivingEdge key={`${edge.from.profile.id}-${edge.to.profile.id}`} edge={edge} index={index} />)}
+          {network.points.map((point) => <LivingNode key={point.profile.id} point={point} onOpen={onOpen} />)}
+        </div>
+
+        <aside className="network-story-card">
+          <span>Tu impacto</span>
+          <strong>{network.directChildren.length}</strong>
+          <p>{network.directChildren.length === 1 ? "persona llegó" : "personas llegaron"} a Nexo directamente gracias a ti.</p>
+          <div className="story-avatars">
+            {network.directChildren.slice(0, 4).map((person) => <Avatar key={person.id} profile={person} size="small" />)}
+            <i>+</i>
+          </div>
+        </aside>
+
+        <div className="living-legend">
+          <span><i className="legend-coral" /> Conexión directa</span>
+          <span><i className="legend-sage" /> Rama extendida</span>
+          <span className="drag-hint"><Move size={13} /> Arrastra el lienzo</span>
+        </div>
       </section>
     </div>
   );
