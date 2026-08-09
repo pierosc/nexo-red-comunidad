@@ -580,12 +580,27 @@ function Workspace({
   const [mobileNav, setMobileNav] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const currentProfile = profiles.find((profile) => profile.clerk_user_id === userId);
-  const displayProfile = currentProfile ?? {
+  const displayProfile = currentProfile ?? (live ? {
+    id: "",
+    clerk_user_id: userId,
+    full_name: userName,
+    photo_url: userImage ?? null,
+    bio: null,
+    cohort: "",
+    birth_date: null,
+    city: null,
+    country: null,
+    profession: null,
+    linkedin_url: null,
+    enrolled_by_id: null,
+    created_at: "",
+    updated_at: "",
+  } : {
     ...demoProfiles[0],
     clerk_user_id: userId,
     full_name: userName,
     photo_url: userImage ?? demoProfiles[0].photo_url,
-  };
+  });
 
   const shouldOnboard = live && !loading && !currentProfile;
   const showEditor = editing || shouldOnboard;
@@ -724,7 +739,7 @@ function Dashboard({ profile, profiles, loading, onOpen, onDirectory, onConnecti
       <section className="stats-grid">
         <article className="stat-card stat-primary"><div className="stat-icon"><Users /></div><span>Personas en la red</span><strong>{loading ? "—" : profiles.length}</strong><small><b>+8</b> este mes</small><div className="stat-decoration">N</div></article>
         <article className="stat-card"><div className="stat-icon coral"><Network /></div><span>Tus conexiones</span><strong>{enrolled.length + (mentor ? 1 : 0)}</strong><small>{enrolled.length} enroladas por ti</small></article>
-        <article className="stat-card"><div className="stat-icon sage"><BookOpen /></div><span>Promociones</span><strong>{new Set(profiles.map((item) => item.cohort)).size}</strong><small>2015 — 2021</small></article>
+        <article className="stat-card"><div className="stat-icon sage"><BookOpen /></div><span>Promociones</span><strong>{new Set(profiles.map((item) => item.cohort)).size}</strong><small>2015 — 2022</small></article>
       </section>
 
       <section className="dashboard-grid">
