@@ -28,6 +28,7 @@ import {
   Minus,
   Move,
   Network,
+  Pencil,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
@@ -318,6 +319,20 @@ function normalizePhotoUrl(value?: string | null) {
   return url;
 }
 
+function instagramHandle(value?: string | null) {
+  if (!value) return "";
+  return value
+    .trim()
+    .replace(/^https?:\/\/(www\.)?instagram\.com\//i, "")
+    .replace(/^@/, "")
+    .split(/[/?#]/)[0];
+}
+
+function normalizeInstagram(value?: string | null) {
+  const handle = instagramHandle(value);
+  return handle ? `https://instagram.com/${handle}` : null;
+}
+
 function legacyCohortToLima(value: string) {
   const legacyYear = value.match(/^Promoción\s+(20\d{2})$/i);
   if (!legacyYear) return value;
@@ -425,9 +440,9 @@ function useProfiles(userId: string, config: NexoConfig, getToken?: () => Promis
     async (draft: ProfileDraft, current?: Profile) => {
       const now = new Date().toISOString();
       const record: Profile = {
+        ...draft,
         id: current?.id ?? crypto.randomUUID(),
         clerk_user_id: userId,
-        ...draft,
         photo_url: normalizePhotoUrl(draft.photo_url),
         photo_zoom: clampPhotoValue(draft.photo_zoom, 1, 2, 1),
         photo_position_x: clampPhotoValue(draft.photo_position_x, 0, 100, 50),
@@ -439,7 +454,7 @@ function useProfiles(userId: string, config: NexoConfig, getToken?: () => Promis
         country: draft.country || null,
         profession: draft.profession || null,
         linkedin_url: draft.linkedin_url || null,
-        instagram_url: draft.instagram_url || null,
+        instagram_url: normalizeInstagram(draft.instagram_url),
         hobbies: draft.hobbies || null,
         address: draft.address || null,
         enrolled_by_id: draft.enrolled_by_id || null,
@@ -1296,7 +1311,12 @@ function CohortInput({ value, onChange }: { value: string; onChange: (value: str
   );
 }
 
+function InstagramInput({ value, onChange }: { value?: string | null; onChange: (value: string) => void }) {
+  return <div className="instagram-handle-input"><span>@</span><input value={instagramHandle(value)} onChange={(event) => onChange(instagramHandle(event.target.value))} placeholder="tu_usuario" inputMode="text" pattern="[A-Za-z0-9._]{1,30}" title="Usa únicamente letras, números, puntos o guiones bajos." /></div>;
+}
+
 function ProfilePhotoEditor({ profile, draft, update }: { profile: Profile; draft: ProfileDraft; update: DraftUpdater }) {
+  const [adjusting, setAdjusting] = useState(false);
   const previewUrl = normalizePhotoUrl(draft.photo_url);
   const previewProfile: Profile = {
     ...profile,
@@ -1306,29 +1326,55 @@ function ProfilePhotoEditor({ profile, draft, update }: { profile: Profile; draf
     photo_position_x: draft.photo_position_x,
     photo_position_y: draft.photo_position_y,
   };
+
+  return (
+    <div className="photo-editor-block">
+      <div className="photo-field">
+        <div className="photo-preview-wrap"><div className="photo-preview-action"><Avatar profile={previewProfile} size="hero" />{previewUrl && <button type="button" onClick={() => setAdjusting(true)} aria-label="Ajustar encuadre de la foto"><Pencil size={14} /></button>}</div><small>Vista previa</small></div>
+        <label><Camera size={16} /><span>Enlace público de tu foto</span><input type="url" value={draft.photo_url ?? ""} onChange={(event) => update("photo_url", event.target.value)} placeholder="https://drive.google.com/file/d/…" />{previewUrl && <a href={previewUrl} target="_blank" rel="noreferrer">Comprobar imagen directa <ArrowUpRight size={13} /></a>}</label>
+      </div>
+      <PhotoLinkGuide />
+      {adjusting && <PhotoAdjustmentDialog profile={previewProfile} draft={draft} update={update} onClose={() => setAdjusting(false)} />}
+    </div>
+  );
+}
+
+function PhotoAdjustmentDialog({ profile, draft, update, onClose }: { profile: Profile; draft: ProfileDraft; update: DraftUpdater; onClose: () => void }) {
+  const drag = useRef<{ pointerId: number; clientX: number; clientY: number; x: number; y: number } | null>(null);
   const resetFrame = () => {
     update("photo_zoom", 1);
     update("photo_position_x", 50);
     update("photo_position_y", 50);
   };
+  const startDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.currentTarget.setPointerCapture(event.pointerId);
+    drag.current = {
+      pointerId: event.pointerId,
+      clientX: event.clientX,
+      clientY: event.clientY,
+      x: clampPhotoValue(draft.photo_position_x, 0, 100, 50),
+      y: clampPhotoValue(draft.photo_position_y, 0, 100, 50),
+    };
+  };
+  const moveDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!drag.current || drag.current.pointerId !== event.pointerId) return;
+    update("photo_position_x", clampPhotoValue(drag.current.x - (event.clientX - drag.current.clientX) * 0.55, 0, 100, 50));
+    update("photo_position_y", clampPhotoValue(drag.current.y - (event.clientY - drag.current.clientY) * 0.55, 0, 100, 50));
+  };
+  const stopDrag = () => { drag.current = null; };
 
   return (
-    <div className="photo-editor-block">
-      <div className="photo-field">
-        <div className="photo-preview-wrap"><Avatar profile={previewProfile} size="hero" /><small>Vista previa</small></div>
-        <label><Camera size={16} /><span>Enlace público de tu foto</span><input type="url" value={draft.photo_url ?? ""} onChange={(event) => update("photo_url", event.target.value)} placeholder="https://drive.google.com/file/d/…" />{previewUrl && <a href={previewUrl} target="_blank" rel="noreferrer">Comprobar imagen directa <ArrowUpRight size={13} /></a>}</label>
-      </div>
-      <PhotoLinkGuide />
-      {previewUrl && (
-        <div className="photo-adjustment">
-          <header><div><strong>Ajustar encuadre</strong><span>Mueve el foco y acerca la imagen hasta que se vea bien.</span></div><button type="button" onClick={resetFrame}>Recentrar</button></header>
-          <div className="photo-sliders">
+    <div className="photo-adjustment-overlay" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}>
+      <section className="photo-adjustment-dialog" role="dialog" aria-modal="true" aria-labelledby="photo-adjustment-title">
+        <header><div><span className="section-label">TU FOTO</span><h3 id="photo-adjustment-title">Ajustar encuadre</h3><p>Arrastra la foto para moverla y usa el control para acercarla.</p></div><button className="close-button" type="button" onClick={onClose} aria-label="Cerrar ajuste de foto"><X /></button></header>
+        <div className="photo-dialog-body">
+          <div className="photo-drag-preview" onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={stopDrag} onPointerCancel={stopDrag}><Avatar profile={{ ...profile, photo_zoom: draft.photo_zoom, photo_position_x: draft.photo_position_x, photo_position_y: draft.photo_position_y }} size="hero" /><span><Move size={15} /> Arrastra para mover</span></div>
+          <div className="photo-dialog-controls">
             <label><span>Zoom <b>{clampPhotoValue(draft.photo_zoom, 1, 2, 1).toFixed(2)}×</b></span><input type="range" min="1" max="2" step="0.05" value={clampPhotoValue(draft.photo_zoom, 1, 2, 1)} onChange={(event) => update("photo_zoom", Number(event.target.value))} /></label>
-            <label><span>Posición horizontal</span><input type="range" min="0" max="100" value={clampPhotoValue(draft.photo_position_x, 0, 100, 50)} onChange={(event) => update("photo_position_x", Number(event.target.value))} /></label>
-            <label><span>Posición vertical</span><input type="range" min="0" max="100" value={clampPhotoValue(draft.photo_position_y, 0, 100, 50)} onChange={(event) => update("photo_position_y", Number(event.target.value))} /></label>
+            <div><button className="ghost-button" type="button" onClick={resetFrame}>Recentrar</button><button className="primary-button" type="button" onClick={onClose}><Check size={16} /> Usar este encuadre</button></div>
           </div>
         </div>
-      )}
+      </section>
     </div>
   );
 }
@@ -1439,7 +1485,7 @@ function ProfileOnboarding({
     }
     setSaving(true);
     setMessage(null);
-    try { await onSave(draft); } catch { setMessage("No pudimos crear tu perfil. Revisa tu conexión e inténtalo de nuevo."); setSaving(false); }
+    try { await onSave(draft); } catch { setMessage("No pudimos guardar el perfil. Tus datos siguen aquí; inténtalo nuevamente."); setSaving(false); }
   };
 
   return (
@@ -1483,7 +1529,7 @@ function ProfileOnboarding({
             {step === 3 && <div className="onboarding-step-panel step-enter"><div className="form-grid onboarding-fields">
               <div className="field field-wide"><span>¿Quién te enroló?</span><ProfilePicker profiles={profiles} profileId={profile.id} value={draft.enrolled_by_id} onChange={(value) => update("enrolled_by_id", value)} /></div>
               <Field label="LinkedIn o portafolio"><input type="url" value={draft.linkedin_url ?? ""} onChange={(event) => update("linkedin_url", event.target.value)} placeholder="https://linkedin.com/in/…" /></Field>
-              <Field label="Instagram"><input type="url" value={draft.instagram_url ?? ""} onChange={(event) => update("instagram_url", event.target.value)} placeholder="https://instagram.com/tu_usuario" /></Field>
+              <Field label="Instagram"><InstagramInput value={draft.instagram_url} onChange={(value) => update("instagram_url", value)} /></Field>
             </div><div className="onboarding-ready"><Sparkles size={21} /><div><strong>Tu perfil está listo para nacer.</strong><p>Al guardarlo podrás explorar el directorio, abrir perfiles y visualizar todas tus conexiones.</p></div></div></div>}
 
             {message && <p className="form-message">{message}</p>}
@@ -1508,7 +1554,7 @@ function ProfileEditor({ profile, profiles, onClose, onSave }: { profile: Profil
     if (!draft.full_name.trim() || !isValidCohort(draft.cohort)) { setMessage("Completa tu nombre y usa el formato de promoción Lima 200."); return; }
     setSaving(true);
     setMessage(null);
-    try { await onSave(draft); } catch { setMessage("No pudimos guardar los cambios. Revisa tu conexión e inténtalo de nuevo."); setSaving(false); }
+    try { await onSave(draft); } catch { setMessage("No pudimos guardar los cambios. Tus datos siguen aquí; inténtalo nuevamente."); setSaving(false); }
   };
   return (
     <div className="overlay editor-overlay" role="presentation">
@@ -1527,7 +1573,7 @@ function ProfileEditor({ profile, profiles, onClose, onSave }: { profile: Profil
             <Field label="Hobbies e intereses"><input value={draft.hobbies ?? ""} onChange={(event) => update("hobbies", event.target.value)} placeholder="Fotografía, running, lectura…" /></Field>
             <div className="field field-wide"><span>¿Quién te enroló?</span><ProfilePicker profiles={profiles} profileId={profile.id} value={draft.enrolled_by_id} onChange={(value) => update("enrolled_by_id", value)} /></div>
             <Field label="LinkedIn o portafolio"><input type="url" value={draft.linkedin_url ?? ""} onChange={(event) => update("linkedin_url", event.target.value)} placeholder="https://linkedin.com/in/..." /></Field>
-            <Field label="Instagram"><input type="url" value={draft.instagram_url ?? ""} onChange={(event) => update("instagram_url", event.target.value)} placeholder="https://instagram.com/tu_usuario" /></Field>
+            <Field label="Instagram"><InstagramInput value={draft.instagram_url} onChange={(value) => update("instagram_url", value)} /></Field>
             <Field label="Tu descripción" wide><textarea rows={4} maxLength={320} value={draft.bio ?? ""} onChange={(event) => update("bio", event.target.value)} placeholder="Cuéntanos brevemente quién eres, qué haces y qué te inspira." /><small>{draft.bio?.length ?? 0}/320</small></Field>
           </div>
           {message && <p className="form-message">{message}</p>}
