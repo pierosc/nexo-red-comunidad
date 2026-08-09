@@ -58,6 +58,9 @@ export type Profile = {
   clerk_user_id: string;
   full_name: string;
   photo_url: string | null;
+  photo_zoom?: number | null;
+  photo_position_x?: number | null;
+  photo_position_y?: number | null;
   bio: string | null;
   cohort: string;
   birth_date: string | null;
@@ -77,6 +80,9 @@ type ProfileDraft = Pick<
   Profile,
   | "full_name"
   | "photo_url"
+  | "photo_zoom"
+  | "photo_position_x"
+  | "photo_position_y"
   | "bio"
   | "cohort"
   | "birth_date"
@@ -279,11 +285,17 @@ const additionalDemoProfiles: Profile[] = demoExpansionSeeds.map((seed, index) =
   updated_at: "2026-08-08T00:00:00Z",
 }));
 
-const demoProfiles: Profile[] = [...coreDemoProfiles, ...additionalDemoProfiles];
+const demoProfiles: Profile[] = [...coreDemoProfiles, ...additionalDemoProfiles].map((profile) => ({
+  ...profile,
+  cohort: legacyCohortToLima(profile.cohort),
+}));
 
 const emptyDraft: ProfileDraft = {
   full_name: "",
   photo_url: "",
+  photo_zoom: 1,
+  photo_position_x: 50,
+  photo_position_y: 50,
   bio: "",
   cohort: "",
   birth_date: "",
@@ -300,10 +312,33 @@ const emptyDraft: ProfileDraft = {
 function normalizePhotoUrl(value?: string | null) {
   const url = value?.trim();
   if (!url) return null;
-  const driveMatch = url.match(/drive\.google\.com\/file\/d\/([^/]+)/);
-  if (driveMatch) return `https://drive.google.com/uc?export=view&id=${driveMatch[1]}`;
+  const driveMatch = url.match(/drive\.google\.com\/file\/d\/([^/?]+)/) ?? url.match(/[?&]id=([^&]+)/);
+  if (driveMatch) return `https://lh3.googleusercontent.com/d/${driveMatch[1]}=w1200`;
   if (url.includes("dropbox.com") && url.includes("dl=0")) return url.replace("dl=0", "raw=1");
   return url;
+}
+
+function legacyCohortToLima(value: string) {
+  const legacyYear = value.match(/^Promoción\s+(20\d{2})$/i);
+  if (!legacyYear) return value;
+  return `Lima ${Number(legacyYear[1]) - 1817}`;
+}
+
+function normalizeCohort(value: string) {
+  const trimmed = value.trim();
+  if (/^\d{3}$/.test(trimmed)) return `Lima ${trimmed}`;
+  const limaMatch = trimmed.match(/^lima\s*(\d{3})$/i);
+  if (limaMatch) return `Lima ${limaMatch[1]}`;
+  return legacyCohortToLima(trimmed);
+}
+
+function isValidCohort(value: string) {
+  return /^Lima\s+\d{3}$/i.test(normalizeCohort(value));
+}
+
+function clampPhotoValue(value: number | null | undefined, min: number, max: number, fallback: number) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.min(max, Math.max(min, numeric)) : fallback;
 }
 
 function initials(name: string) {
@@ -330,12 +365,18 @@ function formatBirthDate(value: string | null) {
 }
 
 function Avatar({ profile, size = "medium" }: { profile: Profile; size?: "small" | "medium" | "large" | "hero" }) {
+  const photoUrl = normalizePhotoUrl(profile.photo_url);
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const photoStyle: CSSProperties = {
+    objectPosition: `${clampPhotoValue(profile.photo_position_x, 0, 100, 50)}% ${clampPhotoValue(profile.photo_position_y, 0, 100, 50)}%`,
+    transform: `scale(${clampPhotoValue(profile.photo_zoom, 1, 2, 1)})`,
+  };
   return (
     <div className={`avatar avatar-${size}`} aria-label={`Foto de ${profile.full_name}`}>
-      {profile.photo_url ? (
+      {photoUrl && failedUrl !== photoUrl ? (
         // Profile photos are user-provided remote URLs, so a fixed image loader is not available.
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={profile.photo_url} alt="" />
+        <img src={photoUrl} alt="" style={photoStyle} onError={() => setFailedUrl(photoUrl)} />
       ) : (
         <span>{initials(profile.full_name)}</span>
       )}
@@ -388,7 +429,11 @@ function useProfiles(userId: string, config: NexoConfig, getToken?: () => Promis
         clerk_user_id: userId,
         ...draft,
         photo_url: normalizePhotoUrl(draft.photo_url),
+        photo_zoom: clampPhotoValue(draft.photo_zoom, 1, 2, 1),
+        photo_position_x: clampPhotoValue(draft.photo_position_x, 0, 100, 50),
+        photo_position_y: clampPhotoValue(draft.photo_position_y, 0, 100, 50),
         bio: draft.bio || null,
+        cohort: normalizeCohort(draft.cohort),
         birth_date: draft.birth_date || null,
         city: draft.city || null,
         country: draft.country || null,
@@ -554,7 +599,7 @@ function Landing({ action, isDemo = false }: { action: React.ReactNode; isDemo?:
           <div className="connection-line line-two" />
           <div className="preview-node node-main">
             <Avatar profile={demoProfiles[0]} size="hero" />
-            <div><strong>Piero</strong><span>Promoción 2018</span></div>
+            <div><strong>Piero</strong><span>Lima 201</span></div>
           </div>
           <div className="preview-node node-top">
             <Avatar profile={demoProfiles[1]} size="medium" />
@@ -610,6 +655,9 @@ function Workspace({
     clerk_user_id: userId,
     full_name: userName,
     photo_url: userImage ?? null,
+    photo_zoom: 1,
+    photo_position_x: 50,
+    photo_position_y: 50,
     bio: null,
     cohort: "",
     birth_date: null,
@@ -1235,6 +1283,56 @@ function ProfilePanel({ profile, profiles, isOwn, onClose, onOpen, onEdit }: { p
   );
 }
 
+type DraftUpdater = (field: keyof ProfileDraft, value: ProfileDraft[keyof ProfileDraft]) => void;
+
+const limaCohortOptions = Array.from({ length: 61 }, (_, index) => `Lima ${180 + index}`);
+
+function CohortInput({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  return (
+    <>
+      <input list="lima-cohorts" value={value} onChange={(event) => onChange(event.target.value)} onBlur={(event) => onChange(normalizeCohort(event.target.value))} placeholder="Lima 200" />
+      <datalist id="lima-cohorts">{limaCohortOptions.map((cohort) => <option key={cohort} value={cohort} />)}</datalist>
+    </>
+  );
+}
+
+function ProfilePhotoEditor({ profile, draft, update }: { profile: Profile; draft: ProfileDraft; update: DraftUpdater }) {
+  const previewUrl = normalizePhotoUrl(draft.photo_url);
+  const previewProfile: Profile = {
+    ...profile,
+    full_name: draft.full_name || profile.full_name,
+    photo_url: previewUrl,
+    photo_zoom: draft.photo_zoom,
+    photo_position_x: draft.photo_position_x,
+    photo_position_y: draft.photo_position_y,
+  };
+  const resetFrame = () => {
+    update("photo_zoom", 1);
+    update("photo_position_x", 50);
+    update("photo_position_y", 50);
+  };
+
+  return (
+    <div className="photo-editor-block">
+      <div className="photo-field">
+        <div className="photo-preview-wrap"><Avatar profile={previewProfile} size="hero" /><small>Vista previa</small></div>
+        <label><Camera size={16} /><span>Enlace público de tu foto</span><input type="url" value={draft.photo_url ?? ""} onChange={(event) => update("photo_url", event.target.value)} placeholder="https://drive.google.com/file/d/…" />{previewUrl && <a href={previewUrl} target="_blank" rel="noreferrer">Comprobar imagen directa <ArrowUpRight size={13} /></a>}</label>
+      </div>
+      <PhotoLinkGuide />
+      {previewUrl && (
+        <div className="photo-adjustment">
+          <header><div><strong>Ajustar encuadre</strong><span>Mueve el foco y acerca la imagen hasta que se vea bien.</span></div><button type="button" onClick={resetFrame}>Recentrar</button></header>
+          <div className="photo-sliders">
+            <label><span>Zoom <b>{clampPhotoValue(draft.photo_zoom, 1, 2, 1).toFixed(2)}×</b></span><input type="range" min="1" max="2" step="0.05" value={clampPhotoValue(draft.photo_zoom, 1, 2, 1)} onChange={(event) => update("photo_zoom", Number(event.target.value))} /></label>
+            <label><span>Posición horizontal</span><input type="range" min="0" max="100" value={clampPhotoValue(draft.photo_position_x, 0, 100, 50)} onChange={(event) => update("photo_position_x", Number(event.target.value))} /></label>
+            <label><span>Posición vertical</span><input type="range" min="0" max="100" value={clampPhotoValue(draft.photo_position_y, 0, 100, 50)} onChange={(event) => update("photo_position_y", Number(event.target.value))} /></label>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PhotoLinkGuide() {
   return (
     <details className="photo-link-guide">
@@ -1243,9 +1341,9 @@ function PhotoLinkGuide() {
         <ol>
           <li>Sube tu foto a Google Drive, Dropbox, Imgur o Cloudinary.</li>
           <li>Activa el acceso público: en Drive elige <strong>“Cualquier persona con el enlace”</strong>.</li>
-          <li>Copia el enlace, pégalo arriba y revisa la vista previa.</li>
+          <li>Copia el enlace de Drive, pégalo arriba y ajusta el encuadre.</li>
         </ol>
-        <p>Los enlaces compartidos de Google Drive y Dropbox se adaptan automáticamente. Evita archivos privados: otras personas no podrían verlos.</p>
+        <p>Nexo convierte el enlace compartido de Drive en una imagen directa. Si la vista previa no aparece, vuelve a comprobar que el acceso general sea público.</p>
       </div>
     </details>
   );
@@ -1323,10 +1421,10 @@ function ProfileOnboarding({
   const [step, setStep] = useState(1);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const update = (field: keyof ProfileDraft, value: string | null) => setDraft((current) => ({ ...current, [field]: value }));
+  const update: DraftUpdater = (field, value) => setDraft((current) => ({ ...current, [field]: value }));
   const continueTo = (next: number) => {
-    if (step === 1 && (!draft.full_name.trim() || !draft.cohort.trim())) {
-      setMessage("Completa tu nombre y promoción para continuar.");
+    if (step === 1 && (!draft.full_name.trim() || !isValidCohort(draft.cohort))) {
+      setMessage("Completa tu nombre y usa el formato de promoción Lima 200.");
       return;
     }
     setMessage(null);
@@ -1334,9 +1432,9 @@ function ProfileOnboarding({
   };
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!draft.full_name.trim() || !draft.cohort.trim()) {
+    if (!draft.full_name.trim() || !isValidCohort(draft.cohort)) {
       setStep(1);
-      setMessage("Completa tu nombre y promoción para crear tu perfil.");
+      setMessage("Completa tu nombre y usa el formato de promoción Lima 200.");
       return;
     }
     setSaving(true);
@@ -1365,11 +1463,10 @@ function ProfileOnboarding({
             <header><span>PASO {step} DE 3</span><h2>{step === 1 ? "Empecemos por ti" : step === 2 ? "Cuéntanos quién eres" : "Conecta tu historia"}</h2><p>{step === 1 ? "Esta información te identificará en el directorio." : step === 2 ? "Ayuda a que otras personas encuentren puntos en común contigo." : "Completa el origen de tu conexión y tus canales públicos."}</p></header>
 
             {step === 1 && <div className="onboarding-step-panel step-enter">
-              <div className="photo-field onboarding-photo"><Avatar profile={{ ...profile, photo_url: normalizePhotoUrl(draft.photo_url), full_name: draft.full_name || profile.full_name }} size="large" /><label><Camera size={16} /><span>Enlace público de tu foto</span><input type="url" value={draft.photo_url ?? ""} onChange={(event) => update("photo_url", event.target.value)} placeholder="https://drive.google.com/file/d/…" /></label></div>
-              <PhotoLinkGuide />
+              <ProfilePhotoEditor profile={profile} draft={draft} update={update} />
               <div className="form-grid onboarding-fields">
                 <Field label="Nombre completo" required><input value={draft.full_name} onChange={(event) => update("full_name", event.target.value)} placeholder="Tu nombre y apellido" /></Field>
-                <Field label="Promoción" required><input value={draft.cohort} onChange={(event) => update("cohort", event.target.value)} placeholder="Promoción 2018" /></Field>
+                <Field label="Promoción" required><CohortInput value={draft.cohort} onChange={(value) => update("cohort", value)} /></Field>
                 <Field label="Fecha de nacimiento"><input type="date" value={draft.birth_date ?? ""} onChange={(event) => update("birth_date", event.target.value)} /></Field>
                 <Field label="Profesión u ocupación"><input value={draft.profession ?? ""} onChange={(event) => update("profession", event.target.value)} placeholder="Diseñador, emprendedora…" /></Field>
               </div>
@@ -1405,10 +1502,10 @@ function ProfileEditor({ profile, profiles, onClose, onSave }: { profile: Profil
   const [draft, setDraft] = useState<ProfileDraft>({ ...emptyDraft, ...profile });
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const update = (field: keyof ProfileDraft, value: string | null) => setDraft((current) => ({ ...current, [field]: value }));
+  const update: DraftUpdater = (field, value) => setDraft((current) => ({ ...current, [field]: value }));
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!draft.full_name.trim() || !draft.cohort.trim()) { setMessage("El nombre y la promoción son obligatorios."); return; }
+    if (!draft.full_name.trim() || !isValidCohort(draft.cohort)) { setMessage("Completa tu nombre y usa el formato de promoción Lima 200."); return; }
     setSaving(true);
     setMessage(null);
     try { await onSave(draft); } catch { setMessage("No pudimos guardar los cambios. Revisa tu conexión e inténtalo de nuevo."); setSaving(false); }
@@ -1418,11 +1515,10 @@ function ProfileEditor({ profile, profiles, onClose, onSave }: { profile: Profil
       <section className="profile-editor" role="dialog" aria-modal="true" aria-labelledby="editor-title">
         <header><div><span className="section-label">TU INFORMACIÓN</span><h2 id="editor-title">Editar perfil</h2><p>Comparte lo esencial para que tu comunidad pueda conocerte.</p></div><button className="close-button" onClick={onClose} aria-label="Cerrar editor"><X /></button></header>
         <form onSubmit={submit}>
-          <div className="photo-field"><Avatar profile={{ ...profile, photo_url: normalizePhotoUrl(draft.photo_url), full_name: draft.full_name || profile.full_name }} size="large" /><label><Camera size={16} /><span>Enlace público de tu foto</span><input type="url" value={draft.photo_url ?? ""} onChange={(event) => update("photo_url", event.target.value)} placeholder="https://drive.google.com/file/d/…" /></label></div>
-          <PhotoLinkGuide />
+          <ProfilePhotoEditor profile={profile} draft={draft} update={update} />
           <div className="form-grid">
             <Field label="Nombre completo" required><input value={draft.full_name} onChange={(event) => update("full_name", event.target.value)} placeholder="Tu nombre y apellido" /></Field>
-            <Field label="Promoción" required><input value={draft.cohort} onChange={(event) => update("cohort", event.target.value)} placeholder="Promoción 2018" /></Field>
+            <Field label="Promoción" required><CohortInput value={draft.cohort} onChange={(value) => update("cohort", value)} /></Field>
             <Field label="Fecha de nacimiento"><input type="date" value={draft.birth_date ?? ""} onChange={(event) => update("birth_date", event.target.value)} /></Field>
             <Field label="Profesión u ocupación"><input value={draft.profession ?? ""} onChange={(event) => update("profession", event.target.value)} placeholder="Diseñador, emprendedora..." /></Field>
             <Field label="Ciudad"><input value={draft.city ?? ""} onChange={(event) => update("city", event.target.value)} placeholder="Lima" /></Field>
