@@ -577,6 +577,7 @@ function Workspace({
   const [cohort, setCohort] = useState("Todas");
   const [selected, setSelected] = useState<Profile | null>(null);
   const [editing, setEditing] = useState(false);
+  const [onboardingDismissed, setOnboardingDismissed] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const currentProfile = profiles.find((profile) => profile.clerk_user_id === userId);
@@ -603,7 +604,7 @@ function Workspace({
   });
 
   const shouldOnboard = live && !loading && !currentProfile;
-  const showEditor = editing || shouldOnboard;
+  const showEditor = editing || (shouldOnboard && !onboardingDismissed);
 
   const cohorts = useMemo(
     () => ["Todas", ...Array.from(new Set(profiles.map((profile) => profile.cohort))).sort()],
@@ -705,8 +706,8 @@ function Workspace({
         <ProfileEditor
           profile={currentProfile ?? displayProfile}
           profiles={profiles}
-          onClose={() => { if (!shouldOnboard) setEditing(false); }}
-          onSave={async (draft) => { await saveProfile(draft, currentProfile); setEditing(false); }}
+          onClose={() => { setEditing(false); if (shouldOnboard) setOnboardingDismissed(true); }}
+          onSave={async (draft) => { await saveProfile(draft, currentProfile); setEditing(false); setOnboardingDismissed(true); }}
         />
       )}
     </div>
