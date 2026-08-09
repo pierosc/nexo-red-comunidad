@@ -11,13 +11,17 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
   ArrowRight,
   ArrowUpRight,
+  AtSign,
   Bell,
   BookOpen,
   CalendarDays,
   Camera,
+  Check,
+  ChevronDown,
   ChevronRight,
   CircleUserRound,
   Home,
+  Heart,
   Link2,
   LocateFixed,
   MapPin,
@@ -61,6 +65,9 @@ export type Profile = {
   country: string | null;
   profession: string | null;
   linkedin_url: string | null;
+  instagram_url?: string | null;
+  hobbies?: string | null;
+  address?: string | null;
   enrolled_by_id: string | null;
   created_at: string;
   updated_at: string;
@@ -77,6 +84,9 @@ type ProfileDraft = Pick<
   | "country"
   | "profession"
   | "linkedin_url"
+  | "instagram_url"
+  | "hobbies"
+  | "address"
   | "enrolled_by_id"
 >;
 
@@ -281,8 +291,20 @@ const emptyDraft: ProfileDraft = {
   country: "",
   profession: "",
   linkedin_url: "",
+  instagram_url: "",
+  hobbies: "",
+  address: "",
   enrolled_by_id: null,
 };
+
+function normalizePhotoUrl(value?: string | null) {
+  const url = value?.trim();
+  if (!url) return null;
+  const driveMatch = url.match(/drive\.google\.com\/file\/d\/([^/]+)/);
+  if (driveMatch) return `https://drive.google.com/uc?export=view&id=${driveMatch[1]}`;
+  if (url.includes("dropbox.com") && url.includes("dl=0")) return url.replace("dl=0", "raw=1");
+  return url;
+}
 
 function initials(name: string) {
   return name
@@ -365,13 +387,16 @@ function useProfiles(userId: string, config: NexoConfig, getToken?: () => Promis
         id: current?.id ?? crypto.randomUUID(),
         clerk_user_id: userId,
         ...draft,
-        photo_url: draft.photo_url || null,
+        photo_url: normalizePhotoUrl(draft.photo_url),
         bio: draft.bio || null,
         birth_date: draft.birth_date || null,
         city: draft.city || null,
         country: draft.country || null,
         profession: draft.profession || null,
         linkedin_url: draft.linkedin_url || null,
+        instagram_url: draft.instagram_url || null,
+        hobbies: draft.hobbies || null,
+        address: draft.address || null,
         enrolled_by_id: draft.enrolled_by_id || null,
         created_at: current?.created_at ?? now,
         updated_at: now,
@@ -577,7 +602,6 @@ function Workspace({
   const [cohort, setCohort] = useState("Todas");
   const [selected, setSelected] = useState<Profile | null>(null);
   const [editing, setEditing] = useState(false);
-  const [onboardingDismissed, setOnboardingDismissed] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const currentProfile = profiles.find((profile) => profile.clerk_user_id === userId);
@@ -593,6 +617,9 @@ function Workspace({
     country: null,
     profession: null,
     linkedin_url: null,
+    instagram_url: null,
+    hobbies: null,
+    address: null,
     enrolled_by_id: null,
     created_at: "",
     updated_at: "",
@@ -604,7 +631,6 @@ function Workspace({
   });
 
   const shouldOnboard = live && !loading && !currentProfile;
-  const showEditor = editing || (shouldOnboard && !onboardingDismissed);
 
   const cohorts = useMemo(
     () => ["Todas", ...Array.from(new Set(profiles.map((profile) => profile.cohort))).sort()],
@@ -620,6 +646,19 @@ function Workspace({
     setMobileNav(false);
     if (next === "profile") setSelected(displayProfile);
   };
+
+  if (live && loading) return <LoadingScreen />;
+
+  if (shouldOnboard) {
+    return (
+      <ProfileOnboarding
+        profile={displayProfile}
+        profiles={profiles}
+        accountControl={accountControl}
+        onSave={(draft) => saveProfile(draft)}
+      />
+    );
+  }
 
   return (
     <div className={`workspace ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
@@ -702,12 +741,12 @@ function Workspace({
           onEdit={() => { setSelected(null); setEditing(true); }}
         />
       )}
-      {showEditor && (
+      {editing && (
         <ProfileEditor
           profile={currentProfile ?? displayProfile}
           profiles={profiles}
-          onClose={() => { setEditing(false); if (shouldOnboard) setOnboardingDismissed(true); }}
-          onSave={async (draft) => { await saveProfile(draft, currentProfile); setEditing(false); setOnboardingDismissed(true); }}
+          onClose={() => setEditing(false)}
+          onSave={async (draft) => { await saveProfile(draft, currentProfile); setEditing(false); }}
         />
       )}
     </div>
@@ -1161,7 +1200,7 @@ function MyProfile({ profile, profiles, onEdit, onOpen }: { profile: Profile; pr
         <div className="identity"><span className="cohort-pill">{profile.cohort}</span><h1>{profile.full_name}</h1><p>{profile.profession}</p><div><span><MapPin size={15} /> {profile.city}, {profile.country}</span><span><CalendarDays size={15} /> {formatBirthDate(profile.birth_date)}</span></div></div>
       </div>
       <div className="profile-content-grid">
-        <section className="section-card profile-about"><span className="section-label">SOBRE MÍ</span><h2>Mi historia</h2><p>{profile.bio || "Aún no has agregado una descripción."}</p>{profile.linkedin_url && <a href={profile.linkedin_url} target="_blank" rel="noreferrer"><Link2 size={16} /> Perfil profesional <ArrowUpRight size={15} /></a>}</section>
+        <section className="section-card profile-about"><span className="section-label">SOBRE MÍ</span><h2>Mi historia</h2><p>{profile.bio || "Aún no has agregado una descripción."}</p><div className="profile-detail-list">{profile.hobbies && <span><Heart size={15} /> {profile.hobbies}</span>}{profile.address && <span><MapPin size={15} /> {profile.address}</span>}</div><div className="profile-social-links">{profile.linkedin_url && <a href={profile.linkedin_url} target="_blank" rel="noreferrer"><Link2 size={16} /> Perfil profesional <ArrowUpRight size={15} /></a>}{profile.instagram_url && <a href={profile.instagram_url} target="_blank" rel="noreferrer"><AtSign size={16} /> Instagram <ArrowUpRight size={15} /></a>}</div></section>
         <section className="section-card profile-links"><span className="section-label">CONEXIONES</span><h2>Mi nexo</h2>{mentor && <ConnectionListItem label="Me enroló" profile={mentor} onClick={() => onOpen(mentor)} />}{enrolled.map((person) => <ConnectionListItem key={person.id} label="Enrolado por mí" profile={person} onClick={() => onOpen(person)} />)}</section>
       </div>
     </div>
@@ -1185,13 +1224,180 @@ function ProfilePanel({ profile, profiles, isOwn, onClose, onOpen, onEdit }: { p
           <h2>{profile.full_name}</h2>
           <p className="panel-role">{profile.profession ?? "Miembro de la comunidad"}</p>
           <div className="panel-meta">{profile.city && <span><MapPin /> {profile.city}, {profile.country}</span>}<span><CalendarDays /> {formatBirthDate(profile.birth_date)}</span></div>
-          <div className="panel-about"><span className="section-label">SU HISTORIA</span><p>{profile.bio || "Esta persona todavía no ha compartido su descripción."}</p></div>
+          <div className="panel-about"><span className="section-label">SU HISTORIA</span><p>{profile.bio || "Esta persona todavía no ha compartido su descripción."}</p><div className="profile-detail-list">{profile.hobbies && <span><Heart size={15} /> {profile.hobbies}</span>}{profile.address && <span><MapPin size={15} /> {profile.address}</span>}</div></div>
           {profile.linkedin_url && <a className="panel-link" href={profile.linkedin_url} target="_blank" rel="noreferrer"><Link2 size={16} /> Ver perfil profesional <ArrowUpRight size={15} /></a>}
+          {profile.instagram_url && <a className="panel-link" href={profile.instagram_url} target="_blank" rel="noreferrer"><AtSign size={16} /> Ver Instagram <ArrowUpRight size={15} /></a>}
           <div className="panel-connections"><div className="section-heading"><div><span className="section-label">CONEXIONES</span><h3>Su nexo</h3></div><Network size={20} /></div>{mentor && <ConnectionListItem label="Le enroló" profile={mentor} onClick={() => onOpen(mentor)} />}{enrolled.map((person) => <ConnectionListItem key={person.id} label="Enrolado por esta persona" profile={person} onClick={() => onOpen(person)} />)}{!mentor && !enrolled.length && <p className="muted-copy">Todavía no tiene conexiones registradas.</p>}</div>
           {isOwn && <button className="primary-button full-button" onClick={onEdit}><UserRoundPen size={17} /> Editar mi perfil</button>}
         </div>
       </aside>
     </div>
+  );
+}
+
+function PhotoLinkGuide() {
+  return (
+    <details className="photo-link-guide">
+      <summary><Camera size={15} /> ¿Cómo obtengo un enlace para mi foto?<ChevronDown size={15} /></summary>
+      <div>
+        <ol>
+          <li>Sube tu foto a Google Drive, Dropbox, Imgur o Cloudinary.</li>
+          <li>Activa el acceso público: en Drive elige <strong>“Cualquier persona con el enlace”</strong>.</li>
+          <li>Copia el enlace, pégalo arriba y revisa la vista previa.</li>
+        </ol>
+        <p>Los enlaces compartidos de Google Drive y Dropbox se adaptan automáticamente. Evita archivos privados: otras personas no podrían verlos.</p>
+      </div>
+    </details>
+  );
+}
+
+function ProfilePicker({
+  profiles,
+  profileId,
+  value,
+  onChange,
+}: {
+  profiles: Profile[];
+  profileId?: string;
+  value: string | null;
+  onChange: (value: string | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const selectedProfile = profiles.find((person) => person.id === value);
+  const options = profiles
+    .filter((person) => person.id !== profileId)
+    .filter((person) => `${person.full_name} ${person.cohort} ${person.profession ?? ""} ${person.city ?? ""}`.toLowerCase().includes(search.trim().toLowerCase()))
+    .slice(0, 12);
+
+  const choose = (next: string | null) => {
+    onChange(next);
+    setOpen(false);
+    setSearch("");
+  };
+
+  return (
+    <div className={`profile-picker ${open ? "picker-open" : ""}`}>
+      <button className="profile-picker-trigger" type="button" onClick={() => setOpen((current) => !current)} aria-haspopup="listbox" aria-expanded={open}>
+        {selectedProfile ? (
+          <><Avatar profile={selectedProfile} size="small" /><span><strong>{selectedProfile.full_name}</strong><small>{selectedProfile.cohort} · {selectedProfile.profession || selectedProfile.city || "Miembro de Nexo"}</small></span></>
+        ) : (
+          <><span className="picker-empty-avatar"><Users size={17} /></span><span><strong>Nadie / No aplica</strong><small>Selecciona solo si alguien te invitó a la red</small></span></>
+        )}
+        <ChevronDown className="picker-chevron" size={17} />
+      </button>
+      {open && (
+        <div className="profile-picker-popover">
+          <label className="picker-search"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por nombre, promoción o profesión…" /></label>
+          <div className="picker-options" role="listbox">
+            <button className={`picker-option ${!value ? "selected" : ""}`} type="button" role="option" aria-selected={!value} onClick={() => choose(null)}>
+              <span className="picker-empty-avatar"><Users size={16} /></span><span><strong>Nadie / No aplica</strong><small>No llegué por invitación de otra persona</small></span>{!value && <Check size={17} />}
+            </button>
+            {options.map((person) => (
+              <button className={`picker-option ${value === person.id ? "selected" : ""}`} key={person.id} type="button" role="option" aria-selected={value === person.id} onClick={() => choose(person.id)}>
+                <Avatar profile={person} size="small" />
+                <span><strong>{person.full_name}</strong><small>{person.cohort} · {person.profession || person.city || "Miembro de Nexo"}</small></span>
+                {value === person.id && <Check size={17} />}
+              </button>
+            ))}
+            {!options.length && <p className="picker-no-results">No encontramos a alguien con esa búsqueda.</p>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProfileOnboarding({
+  profile,
+  profiles,
+  accountControl,
+  onSave,
+}: {
+  profile: Profile;
+  profiles: Profile[];
+  accountControl: React.ReactNode;
+  onSave: (draft: ProfileDraft) => Promise<Profile | void>;
+}) {
+  const [draft, setDraft] = useState<ProfileDraft>({ ...emptyDraft, ...profile });
+  const [step, setStep] = useState(1);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const update = (field: keyof ProfileDraft, value: string | null) => setDraft((current) => ({ ...current, [field]: value }));
+  const continueTo = (next: number) => {
+    if (step === 1 && (!draft.full_name.trim() || !draft.cohort.trim())) {
+      setMessage("Completa tu nombre y promoción para continuar.");
+      return;
+    }
+    setMessage(null);
+    setStep(next);
+  };
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!draft.full_name.trim() || !draft.cohort.trim()) {
+      setStep(1);
+      setMessage("Completa tu nombre y promoción para crear tu perfil.");
+      return;
+    }
+    setSaving(true);
+    setMessage(null);
+    try { await onSave(draft); } catch { setMessage("No pudimos crear tu perfil. Revisa tu conexión e inténtalo de nuevo."); setSaving(false); }
+  };
+
+  return (
+    <main className="onboarding-shell">
+      <header className="onboarding-topbar"><Brand /><div><span>Tu cuenta está protegida</span>{accountControl}</div></header>
+      <div className="onboarding-layout">
+        <aside className="onboarding-intro">
+          <span className="section-label">BIENVENIDO A NEXO</span>
+          <h1>Construyamos tu lugar en la red.</h1>
+          <p>Antes de mostrarte la comunidad, necesitamos conocerte un poco. Podrás modificar todo después.</p>
+          <div className="onboarding-steps" aria-label="Progreso del perfil">
+            {["Tu identidad", "Sobre ti", "Tu conexión"].map((label, index) => {
+              const number = index + 1;
+              return <div className={`${step === number ? "active" : ""} ${step > number ? "complete" : ""}`} key={label}><i>{step > number ? <Check size={14} /> : number}</i><span><strong>{label}</strong><small>{number === 1 ? "Nombre, foto y promoción" : number === 2 ? "Historia e intereses" : "Personas y redes"}</small></span></div>;
+            })}
+          </div>
+        </aside>
+
+        <section className="onboarding-card">
+          <form onSubmit={submit}>
+            <header><span>PASO {step} DE 3</span><h2>{step === 1 ? "Empecemos por ti" : step === 2 ? "Cuéntanos quién eres" : "Conecta tu historia"}</h2><p>{step === 1 ? "Esta información te identificará en el directorio." : step === 2 ? "Ayuda a que otras personas encuentren puntos en común contigo." : "Completa el origen de tu conexión y tus canales públicos."}</p></header>
+
+            {step === 1 && <div className="onboarding-step-panel step-enter">
+              <div className="photo-field onboarding-photo"><Avatar profile={{ ...profile, photo_url: normalizePhotoUrl(draft.photo_url), full_name: draft.full_name || profile.full_name }} size="large" /><label><Camera size={16} /><span>Enlace público de tu foto</span><input type="url" value={draft.photo_url ?? ""} onChange={(event) => update("photo_url", event.target.value)} placeholder="https://drive.google.com/file/d/…" /></label></div>
+              <PhotoLinkGuide />
+              <div className="form-grid onboarding-fields">
+                <Field label="Nombre completo" required><input value={draft.full_name} onChange={(event) => update("full_name", event.target.value)} placeholder="Tu nombre y apellido" /></Field>
+                <Field label="Promoción" required><input value={draft.cohort} onChange={(event) => update("cohort", event.target.value)} placeholder="Promoción 2018" /></Field>
+                <Field label="Fecha de nacimiento"><input type="date" value={draft.birth_date ?? ""} onChange={(event) => update("birth_date", event.target.value)} /></Field>
+                <Field label="Profesión u ocupación"><input value={draft.profession ?? ""} onChange={(event) => update("profession", event.target.value)} placeholder="Diseñador, emprendedora…" /></Field>
+              </div>
+            </div>}
+
+            {step === 2 && <div className="onboarding-step-panel step-enter"><div className="form-grid onboarding-fields">
+              <Field label="Ciudad"><input value={draft.city ?? ""} onChange={(event) => update("city", event.target.value)} placeholder="Lima" /></Field>
+              <Field label="País"><input value={draft.country ?? ""} onChange={(event) => update("country", event.target.value)} placeholder="Perú" /></Field>
+              <Field label="Dirección o zona"><input value={draft.address ?? ""} onChange={(event) => update("address", event.target.value)} placeholder="Miraflores, Lima" /><small>Comparte solo una referencia que quieras hacer pública.</small></Field>
+              <Field label="Hobbies e intereses"><input value={draft.hobbies ?? ""} onChange={(event) => update("hobbies", event.target.value)} placeholder="Fotografía, running, lectura…" /></Field>
+              <Field label="Tu descripción" wide><textarea rows={5} maxLength={320} value={draft.bio ?? ""} onChange={(event) => update("bio", event.target.value)} placeholder="Cuéntanos brevemente quién eres, qué haces y qué te inspira." /><small>{draft.bio?.length ?? 0}/320</small></Field>
+            </div></div>}
+
+            {step === 3 && <div className="onboarding-step-panel step-enter"><div className="form-grid onboarding-fields">
+              <div className="field field-wide"><span>¿Quién te enroló?</span><ProfilePicker profiles={profiles} profileId={profile.id} value={draft.enrolled_by_id} onChange={(value) => update("enrolled_by_id", value)} /></div>
+              <Field label="LinkedIn o portafolio"><input type="url" value={draft.linkedin_url ?? ""} onChange={(event) => update("linkedin_url", event.target.value)} placeholder="https://linkedin.com/in/…" /></Field>
+              <Field label="Instagram"><input type="url" value={draft.instagram_url ?? ""} onChange={(event) => update("instagram_url", event.target.value)} placeholder="https://instagram.com/tu_usuario" /></Field>
+            </div><div className="onboarding-ready"><Sparkles size={21} /><div><strong>Tu perfil está listo para nacer.</strong><p>Al guardarlo podrás explorar el directorio, abrir perfiles y visualizar todas tus conexiones.</p></div></div></div>}
+
+            {message && <p className="form-message">{message}</p>}
+            <footer>
+              {step > 1 ? <button className="ghost-button" type="button" onClick={() => continueTo(step - 1)}>Atrás</button> : <span />}
+              {step < 3 ? <button className="primary-button" type="button" onClick={() => continueTo(step + 1)}>Continuar <ArrowRight size={17} /></button> : <button className="primary-button" type="submit" disabled={saving}><Save size={17} /> {saving ? "Creando tu perfil…" : "Entrar a Nexo"}</button>}
+            </footer>
+          </form>
+        </section>
+      </div>
+    </main>
   );
 }
 
@@ -1212,7 +1418,8 @@ function ProfileEditor({ profile, profiles, onClose, onSave }: { profile: Profil
       <section className="profile-editor" role="dialog" aria-modal="true" aria-labelledby="editor-title">
         <header><div><span className="section-label">TU INFORMACIÓN</span><h2 id="editor-title">Editar perfil</h2><p>Comparte lo esencial para que tu comunidad pueda conocerte.</p></div><button className="close-button" onClick={onClose} aria-label="Cerrar editor"><X /></button></header>
         <form onSubmit={submit}>
-          <div className="photo-field"><Avatar profile={{ ...profile, photo_url: draft.photo_url || null, full_name: draft.full_name || profile.full_name }} size="large" /><label><Camera size={16} /><span>Foto de perfil como enlace</span><input type="url" value={draft.photo_url ?? ""} onChange={(event) => update("photo_url", event.target.value)} placeholder="https://ejemplo.com/mi-foto.jpg" /></label></div>
+          <div className="photo-field"><Avatar profile={{ ...profile, photo_url: normalizePhotoUrl(draft.photo_url), full_name: draft.full_name || profile.full_name }} size="large" /><label><Camera size={16} /><span>Enlace público de tu foto</span><input type="url" value={draft.photo_url ?? ""} onChange={(event) => update("photo_url", event.target.value)} placeholder="https://drive.google.com/file/d/…" /></label></div>
+          <PhotoLinkGuide />
           <div className="form-grid">
             <Field label="Nombre completo" required><input value={draft.full_name} onChange={(event) => update("full_name", event.target.value)} placeholder="Tu nombre y apellido" /></Field>
             <Field label="Promoción" required><input value={draft.cohort} onChange={(event) => update("cohort", event.target.value)} placeholder="Promoción 2018" /></Field>
@@ -1220,8 +1427,11 @@ function ProfileEditor({ profile, profiles, onClose, onSave }: { profile: Profil
             <Field label="Profesión u ocupación"><input value={draft.profession ?? ""} onChange={(event) => update("profession", event.target.value)} placeholder="Diseñador, emprendedora..." /></Field>
             <Field label="Ciudad"><input value={draft.city ?? ""} onChange={(event) => update("city", event.target.value)} placeholder="Lima" /></Field>
             <Field label="País"><input value={draft.country ?? ""} onChange={(event) => update("country", event.target.value)} placeholder="Perú" /></Field>
-            <Field label="¿Quién te enroló?"><select value={draft.enrolled_by_id ?? ""} onChange={(event) => update("enrolled_by_id", event.target.value || null)}><option value="">Nadie / No aplica</option>{profiles.filter((person) => person.id !== profile.id).map((person) => <option key={person.id} value={person.id}>{person.full_name}</option>)}</select></Field>
+            <Field label="Dirección o zona"><input value={draft.address ?? ""} onChange={(event) => update("address", event.target.value)} placeholder="Miraflores, Lima" /></Field>
+            <Field label="Hobbies e intereses"><input value={draft.hobbies ?? ""} onChange={(event) => update("hobbies", event.target.value)} placeholder="Fotografía, running, lectura…" /></Field>
+            <div className="field field-wide"><span>¿Quién te enroló?</span><ProfilePicker profiles={profiles} profileId={profile.id} value={draft.enrolled_by_id} onChange={(value) => update("enrolled_by_id", value)} /></div>
             <Field label="LinkedIn o portafolio"><input type="url" value={draft.linkedin_url ?? ""} onChange={(event) => update("linkedin_url", event.target.value)} placeholder="https://linkedin.com/in/..." /></Field>
+            <Field label="Instagram"><input type="url" value={draft.instagram_url ?? ""} onChange={(event) => update("instagram_url", event.target.value)} placeholder="https://instagram.com/tu_usuario" /></Field>
             <Field label="Tu descripción" wide><textarea rows={4} maxLength={320} value={draft.bio ?? ""} onChange={(event) => update("bio", event.target.value)} placeholder="Cuéntanos brevemente quién eres, qué haces y qué te inspira." /><small>{draft.bio?.length ?? 0}/320</small></Field>
           </div>
           {message && <p className="form-message">{message}</p>}
