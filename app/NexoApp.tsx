@@ -1347,6 +1347,7 @@ function PhotoAdjustmentDialog({ profile, draft, update, onClose }: { profile: P
     update("photo_position_y", 50);
   };
   const startDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
     drag.current = {
       pointerId: event.pointerId,
@@ -1358,8 +1359,20 @@ function PhotoAdjustmentDialog({ profile, draft, update, onClose }: { profile: P
   };
   const moveDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (!drag.current || drag.current.pointerId !== event.pointerId) return;
-    update("photo_position_x", clampPhotoValue(drag.current.x - (event.clientX - drag.current.clientX) * 0.55, 0, 100, 50));
-    update("photo_position_y", clampPhotoValue(drag.current.y - (event.clientY - drag.current.clientY) * 0.55, 0, 100, 50));
+    event.preventDefault();
+    const sensitivity = 1.6;
+    const nextX = clampPhotoValue(drag.current.x - (event.clientX - drag.current.clientX) * sensitivity, 0, 100, 50);
+    const nextY = clampPhotoValue(drag.current.y - (event.clientY - drag.current.clientY) * sensitivity, 0, 100, 50);
+
+    drag.current = {
+      ...drag.current,
+      clientX: event.clientX,
+      clientY: event.clientY,
+      x: nextX,
+      y: nextY,
+    };
+    update("photo_position_x", nextX);
+    update("photo_position_y", nextY);
   };
   const stopDrag = () => { drag.current = null; };
 
