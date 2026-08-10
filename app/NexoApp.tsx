@@ -1046,6 +1046,17 @@ type CohortGroup = {
   color: string;
 };
 
+type CohortConnectionLayout = {
+  id: string;
+  d: string;
+  fromId: string;
+  toId: string;
+  fromName: string;
+  toName: string;
+  fromCohort: string;
+  toCohort: string;
+};
+
 function buildCohortGroups(profiles: Profile[]): CohortGroup[] {
   const colors = ["#ef745b", "#e8a65b", "#a4bb91", "#72a9a1", "#7095bd", "#9b86bd", "#c67f9f", "#db8a70"];
   const grouped = new Map<string, Profile[]>();
@@ -1073,8 +1084,94 @@ function CohortGalaxy({
   onOpen: (profile: Profile) => void;
 }) {
   const groups = useMemo(() => buildCohortGroups(profiles), [profiles]);
+  const profileById = useMemo(() => new Map(profiles.map((profile) => [profile.id, profile])), [profiles]);
   const [cohortQuery, setCohortQuery] = useState("");
+  const [hoveredProfileId, setHoveredProfileId] = useState<string | null>(null);
+  const [connectionLayout, setConnectionLayout] = useState<{ width: number; height: number; edges: CohortConnectionLayout[] }>({ width: 0, height: 0, edges: [] });
+  const stackRef = useRef<HTMLDivElement>(null);
   const sectionRefs = useRef(new Map<string, HTMLElement>());
+  const memberRefs = useRef(new Map<string, HTMLButtonElement>());
+
+  useEffect(() => {
+    const stack = stackRef.current;
+    if (!stack) return;
+    let frame = 0;
+    const measureConnections = () => {
+      const stackBounds = stack.getBoundingClientRect();
+      const edges: CohortConnectionLayout[] = [];
+
+      profiles.forEach((person) => {
+        if (!person.enrolled_by_id) return;
+        const enroller = profileById.get(person.enrolled_by_id);
+        const fromNode = memberRefs.current.get(person.enrolled_by_id);
+        const toNode = memberRefs.current.get(person.id);
+        if (!enroller || !fromNode || !toNode) return;
+
+        const from = fromNode.getBoundingClientRect();
+        const to = toNode.getBoundingClientRect();
+        const fromCenter = { x: from.left - stackBounds.left + from.width / 2, y: from.top - stackBounds.top + from.height / 2 };
+        const toCenter = { x: to.left - stackBounds.left + to.width / 2, y: to.top - stackBounds.top + to.height / 2 };
+        const mostlyVertical = Math.abs(toCenter.y - fromCenter.y) >= 80;
+        let d: string;
+
+        if (mostlyVertical) {
+          const direction = toCenter.y >= fromCenter.y ? 1 : -1;
+          const x1 = fromCenter.x;
+          const y1 = fromCenter.y + direction * from.height / 2;
+          const x2 = toCenter.x;
+          const y2 = toCenter.y - direction * to.height / 2;
+          const midY = (y1 + y2) / 2;
+          d = `M ${x1.toFixed(1)} ${y1.toFixed(1)} C ${x1.toFixed(1)} ${midY.toFixed(1)}, ${x2.toFixed(1)} ${midY.toFixed(1)}, ${x2.toFixed(1)} ${y2.toFixed(1)}`;
+        } else {
+          const direction = toCenter.x >= fromCenter.x ? 1 : -1;
+          const x1 = fromCenter.x + direction * from.width / 2;
+          const y1 = fromCenter.y;
+          const x2 = toCenter.x - direction * to.width / 2;
+          const y2 = toCenter.y;
+          const distance = x2 - x1;
+          const controlY = Math.min(y1, y2) - Math.max(28, Math.abs(distance) * 0.12);
+          d = `M ${x1.toFixed(1)} ${y1.toFixed(1)} C ${(x1 + distance * 0.28).toFixed(1)} ${controlY.toFixed(1)}, ${(x2 - distance * 0.28).toFixed(1)} ${controlY.toFixed(1)}, ${x2.toFixed(1)} ${y2.toFixed(1)}`;
+        }
+
+        edges.push({
+          id: `${enroller.id}-${person.id}`,
+          d,
+          fromId: enroller.id,
+          toId: person.id,
+          fromName: enroller.full_name,
+          toName: person.full_name,
+          fromCohort: enroller.cohort,
+          toCohort: person.cohort,
+        });
+      });
+
+      setConnectionLayout({ width: stack.scrollWidth, height: stack.scrollHeight, edges });
+    };
+    const scheduleMeasurement = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(measureConnections);
+    };
+    const observer = new ResizeObserver(scheduleMeasurement);
+    observer.observe(stack);
+    window.addEventListener("resize", scheduleMeasurement);
+    scheduleMeasurement();
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+      window.removeEventListener("resize", scheduleMeasurement);
+    };
+  }, [profileById, profiles]);
+
+  const relatedProfileIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (!hoveredProfileId) return ids;
+    ids.add(hoveredProfileId);
+    profiles.forEach((person) => {
+      if (person.enrolled_by_id === hoveredProfileId) ids.add(person.id);
+      if (person.id === hoveredProfileId && person.enrolled_by_id) ids.add(person.enrolled_by_id);
+    });
+    return ids;
+  }, [hoveredProfileId, profiles]);
 
   const focusCohort = (group: CohortGroup) => {
     onSelectCohort(group.cohort);
@@ -1101,7 +1198,20 @@ function CohortGalaxy({
         <button type="submit"><LocateFixed size={15} /> Centrar</button>
       </form>
       <div className="cohort-stack-scroll">
-        <div className="cohort-stack">
+        <div className="cohort-stack" ref={stackRef}>
+          {connectionLayout.width > 0 && <svg className="cohort-connection-layer" width={connectionLayout.width} height={connectionLayout.height} viewBox={`0 0 ${connectionLayout.width} ${connectionLayout.height}`} aria-hidden="true">
+            <defs>
+              <marker id="cohort-arrow-direct" markerHeight="7" markerWidth="7" orient="auto" refX="6" refY="3.5"><path d="M0,0 L7,3.5 L0,7 Z" /></marker>
+              <marker id="cohort-arrow-cross" markerHeight="7" markerWidth="7" orient="auto" refX="6" refY="3.5"><path d="M0,0 L7,3.5 L0,7 Z" /></marker>
+            </defs>
+            {connectionLayout.edges.map((edge) => {
+              const crossCohort = edge.fromCohort !== edge.toCohort;
+              const hoverActive = hoveredProfileId === edge.fromId || hoveredProfileId === edge.toId;
+              const cohortActive = selectedCohort === null || selectedCohort === edge.fromCohort || selectedCohort === edge.toCohort;
+              const dimmed = (hoveredProfileId !== null && !hoverActive) || !cohortActive;
+              return <path key={edge.id} className={`cohort-connection ${crossCohort ? "is-cross-cohort" : "is-same-cohort"} ${hoverActive ? "is-active" : ""} ${dimmed ? "is-dimmed" : ""}`} d={edge.d} markerEnd={`url(#${crossCohort ? "cohort-arrow-cross" : "cohort-arrow-direct"})`}><title>{edge.fromName} enroló a {edge.toName}</title></path>;
+            })}
+          </svg>}
           {groups.map((group, groupIndex) => {
             const selected = selectedCohort === group.cohort;
             const dimmed = selectedCohort !== null && !selected;
@@ -1122,11 +1232,16 @@ function CohortGalaxy({
                 <div className="cohort-members-grid">
                   {group.members.map((member, memberIndex) => (
                     <button
-                      className="cohort-stack-member"
+                      className={`cohort-stack-member ${hoveredProfileId === member.id ? "is-active" : ""} ${relatedProfileIds.has(member.id) && hoveredProfileId !== member.id ? "is-connected" : ""}`}
                       key={member.id}
+                      ref={(node) => { if (node) memberRefs.current.set(member.id, node); else memberRefs.current.delete(member.id); }}
                       style={{ "--member-delay": `${groupIndex * -0.35 - memberIndex * 0.08}s` } as CSSProperties}
                       type="button"
-                      title={`${member.full_name} · ${member.profession ?? group.cohort}`}
+                      title={member.enrolled_by_id && profileById.get(member.enrolled_by_id) ? `${profileById.get(member.enrolled_by_id)?.full_name} enroló a ${member.full_name}` : `${member.full_name} · inicio de esta rama`}
+                      onMouseEnter={() => setHoveredProfileId(member.id)}
+                      onMouseLeave={() => setHoveredProfileId(null)}
+                      onFocus={() => setHoveredProfileId(member.id)}
+                      onBlur={() => setHoveredProfileId(null)}
                       onClick={() => onOpen(member)}
                     >
                       <Avatar profile={member} size="small" />
@@ -1255,8 +1370,8 @@ function Connections({ profile, profiles, onOpen }: { profile: Profile; profiles
         )}
 
         <div className="living-legend">
-          <span><i className="legend-coral" /> {networkMode === "lineage" ? "Conexión directa" : "Promoción seleccionada"}</span>
-          <span><i className="legend-sage" /> {networkMode === "lineage" ? "Rama extendida" : "Órbitas de personas"}</span>
+          <span><i className="legend-coral" /> {networkMode === "lineage" ? "Conexión directa" : "Enroló a (flecha)"}</span>
+          <span><i className="legend-sage" /> {networkMode === "lineage" ? "Rama extendida" : "Conexión entre Limas"}</span>
           <span className="drag-hint"><Move size={13} /> {networkMode === "lineage" ? "Arrastra el lienzo" : "Rueda para recorrer"}</span>
         </div>
       </section>
