@@ -11,6 +11,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
   ArrowRight,
   ArrowUpRight,
+  AlertTriangle,
   AtSign,
   BookOpen,
   CalendarDays,
@@ -39,6 +40,7 @@ import {
   ShieldCheck,
   Sparkles,
   Sun,
+  Trash2,
   UserRoundPen,
   Users,
   X,
@@ -56,7 +58,7 @@ import {
 
 type View = "home" | "directory" | "connections" | "profile";
 
-const APP_VERSION = "1.0.20";
+const APP_VERSION = "1.0.21";
 
 export type Profile = {
   id: string;
@@ -532,7 +534,18 @@ function useProfiles(userId: string, config: NexoConfig, getToken?: () => Promis
     [client, refresh, userId],
   );
 
-  return { profiles, loading, error, live, saveProfile };
+  const deleteProfile = useCallback(async () => {
+    if (client) {
+      const { error: deleteError } = await client
+        .from("profiles")
+        .delete()
+        .eq("clerk_user_id", userId);
+      if (deleteError) throw deleteError;
+    }
+    setProfiles((previous) => previous.filter((profile) => profile.clerk_user_id !== userId));
+  }, [client, userId]);
+
+  return { profiles, loading, error, live, saveProfile, deleteProfile };
 }
 
 export default function NexoApp({ config }: { config: NexoConfig }) {
@@ -581,6 +594,10 @@ function ClerkExperience({ config }: { config: NexoConfig }) {
       getToken={getToken}
       config={config}
       accountControl={<UserButton />}
+      onDeleteAccount={async () => {
+        if (!user) throw new Error("No encontramos la cuenta activa.");
+        await user.delete();
+      }}
     />
   );
 }
@@ -696,6 +713,7 @@ function Workspace({
   getToken,
   config,
   accountControl,
+  onDeleteAccount,
 }: {
   userId: string;
   userName: string;
@@ -703,13 +721,15 @@ function Workspace({
   getToken?: () => Promise<string | null>;
   config: NexoConfig;
   accountControl: React.ReactNode;
+  onDeleteAccount?: () => Promise<void>;
 }) {
-  const { profiles, loading, error, live, saveProfile } = useProfiles(userId, config, getToken);
+  const { profiles, loading, error, live, saveProfile, deleteProfile } = useProfiles(userId, config, getToken);
   const [view, setView] = useState<View>("home");
   const [query, setQuery] = useState("");
   const [cohort, setCohort] = useState("Todas");
   const [selected, setSelected] = useState<Profile | null>(null);
   const [editing, setEditing] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [theme, setTheme] = useState<"light" | "dark">("light");
@@ -760,6 +780,16 @@ function Workspace({
   });
 
   const shouldOnboard = live && !loading && !currentProfile;
+  const removeAccount = async () => {
+    if (!onDeleteAccount) return;
+    await deleteProfile();
+    try {
+      await onDeleteAccount();
+    } catch (deleteError) {
+      if (currentProfile) await saveProfile(currentProfile, currentProfile);
+      throw deleteError;
+    }
+  };
 
   const cohorts = useMemo(
     () => ["Todas", ...Array.from(new Set(profiles.map((profile) => profile.cohort))).sort()],
@@ -849,7 +879,7 @@ function Workspace({
           )}
           {view === "connections" && <Connections profile={displayProfile} profiles={profiles} onOpen={setSelected} />}
           {view === "profile" && (
-            <MyProfile profile={displayProfile} profiles={profiles} onEdit={() => setEditing(true)} onOpen={setSelected} />
+            <MyProfile profile={displayProfile} profiles={profiles} onEdit={() => setEditing(true)} onOpen={setSelected} onDeleteRequest={onDeleteAccount ? () => setDeletingAccount(true) : undefined} />
           )}
         </main>
       </div>
@@ -872,6 +902,7 @@ function Workspace({
           onSave={async (draft) => { await saveProfile(draft, currentProfile); setEditing(false); }}
         />
       )}
+      {deletingAccount && <AccountDeletionDialog onClose={() => setDeletingAccount(false)} onConfirm={removeAccount} />}
     </div>
   );
 }
@@ -1513,7 +1544,7 @@ function Connections({ profile, profiles, onOpen }: { profile: Profile; profiles
   );
 }
 
-function MyProfile({ profile, profiles, onEdit, onOpen }: { profile: Profile; profiles: Profile[]; onEdit: () => void; onOpen: (profile: Profile) => void }) {
+function MyProfile({ profile, profiles, onEdit, onOpen, onDeleteRequest }: { profile: Profile; profiles: Profile[]; onEdit: () => void; onOpen: (profile: Profile) => void; onDeleteRequest?: () => void }) {
   const mentor = profiles.find((person) => person.id === profile.enrolled_by_id);
   const enrolled = profiles.filter((person) => person.enrolled_by_id === profile.id);
   return (
@@ -1527,6 +1558,40 @@ function MyProfile({ profile, profiles, onEdit, onOpen }: { profile: Profile; pr
         <section className="section-card profile-about"><span className="section-label">SOBRE MÍ</span><h2>Mi historia</h2><p>{profile.bio || "Aún no has agregado una descripción."}</p><div className="profile-detail-list">{profile.hobbies && <span><Heart size={15} /> {profile.hobbies}</span>}{profile.address && <span><MapPin size={15} /> {profile.address}</span>}</div><div className="profile-social-links">{profile.linkedin_url && <a href={profile.linkedin_url} target="_blank" rel="noreferrer"><Link2 size={16} /> Perfil profesional <ArrowUpRight size={15} /></a>}{profile.instagram_url && <a href={profile.instagram_url} target="_blank" rel="noreferrer"><AtSign size={16} /> Instagram <ArrowUpRight size={15} /></a>}</div></section>
         <section className="section-card profile-links"><span className="section-label">CONEXIONES</span><h2>Mi nexo</h2>{mentor && <ConnectionListItem label="Me enroló" profile={mentor} onClick={() => onOpen(mentor)} />}{enrolled.map((person) => <ConnectionListItem key={person.id} label="Enrolado por mí" profile={person} onClick={() => onOpen(person)} />)}</section>
       </div>
+      {onDeleteRequest && <section className="account-danger-zone"><div><span className="section-label">CUENTA</span><h2>Eliminar mi cuenta</h2><p>Esta acción elimina permanentemente tu perfil, tus datos públicos y tu acceso a Nexo.</p></div><button type="button" onClick={onDeleteRequest}><Trash2 size={17} /> Eliminar cuenta</button></section>}
+    </div>
+  );
+}
+
+function AccountDeletionDialog({ onClose, onConfirm }: { onClose: () => void; onConfirm: () => Promise<void> }) {
+  const [confirmation, setConfirmation] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [message, setMessage] = useState("");
+  const confirmed = confirmation.trim().toUpperCase() === "ELIMINAR";
+  const remove = async () => {
+    if (!confirmed || submitting) return;
+    setSubmitting(true);
+    setMessage("");
+    try {
+      await onConfirm();
+    } catch {
+      setMessage("No pudimos eliminar tu cuenta. Tus datos se conservaron; inténtalo nuevamente.");
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="account-delete-overlay" role="presentation" onMouseDown={(event) => { if (!submitting && event.currentTarget === event.target) onClose(); }}>
+      <section className="account-delete-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-account-title">
+        <button className="close-button" type="button" onClick={onClose} disabled={submitting} aria-label="Cerrar"><X /></button>
+        <div className="danger-icon"><AlertTriangle size={24} /></div>
+        <span className="section-label">ACCIÓN PERMANENTE</span>
+        <h2 id="delete-account-title">Eliminar tu cuenta</h2>
+        <p>Se eliminarán tu perfil de Nexo y tu cuenta de acceso. Esta acción no se puede deshacer.</p>
+        <label><span>Escribe <strong>ELIMINAR</strong> para confirmar</span><input value={confirmation} onChange={(event) => setConfirmation(event.target.value)} autoComplete="off" disabled={submitting} /></label>
+        {message && <p className="delete-account-error">{message}</p>}
+        <div className="account-delete-actions"><button className="ghost-button" type="button" onClick={onClose} disabled={submitting}>Cancelar</button><button className="delete-account-confirm" type="button" onClick={remove} disabled={!confirmed || submitting}><Trash2 size={16} /> {submitting ? "Eliminando…" : "Eliminar definitivamente"}</button></div>
+      </section>
     </div>
   );
 }
