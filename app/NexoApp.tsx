@@ -54,6 +54,8 @@ import {
 
 type View = "home" | "directory" | "connections" | "profile";
 
+const APP_VERSION = "1.0.16";
+
 export type Profile = {
   id: string;
   clerk_user_id: string;
@@ -753,8 +755,8 @@ function Workspace({
           <button type="button"><UserPlus size={16} /> Invitar persona</button>
         </div>
         <div className="sidebar-footer">
-          <span className={`status-dot ${live ? "status-live" : ""}`} />
-          {live ? "Conectado a Supabase" : "Datos de demostración"}
+          <span className="sidebar-status"><span className={`status-dot ${live ? "status-live" : ""}`} />{live ? "Conectado" : "Demostración"}</span>
+          <span className="app-version">v{APP_VERSION}</span>
         </div>
       </aside>
       {mobileNav && <button className="nav-backdrop" aria-label="Cerrar menú" onClick={() => setMobileNav(false)} />}
@@ -789,7 +791,7 @@ function Workspace({
               loading={loading}
               onOpen={setSelected}
               onDirectory={() => setView("directory")}
-              onConnections={() => setView("connections")}
+              onConnections={() => navigate("connections")}
             />
           )}
           {view === "directory" && (
@@ -1193,11 +1195,13 @@ function CohortGalaxy({
     const observer = new ResizeObserver(scheduleMeasurement);
     observer.observe(stack);
     window.addEventListener("resize", scheduleMeasurement);
+    stack.addEventListener("animationend", scheduleMeasurement, true);
     scheduleMeasurement();
     return () => {
       cancelAnimationFrame(frame);
       observer.disconnect();
       window.removeEventListener("resize", scheduleMeasurement);
+      stack.removeEventListener("animationend", scheduleMeasurement, true);
     };
   }, [profileById, profiles]);
 
