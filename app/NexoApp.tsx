@@ -1043,29 +1043,21 @@ function LivingNode({ point, onOpen }: { point: NetworkPoint; onOpen: (profile: 
 type CohortGroup = {
   cohort: string;
   members: Profile[];
-  x: number;
-  y: number;
   color: string;
 };
 
 function buildCohortGroups(profiles: Profile[]): CohortGroup[] {
-  const positions = [
-    [-445, -205], [-150, -225], [150, -225], [445, -205],
-    [-445, 205], [-150, 225], [150, 225], [445, 205],
-  ];
   const colors = ["#ef745b", "#e8a65b", "#a4bb91", "#72a9a1", "#7095bd", "#9b86bd", "#c67f9f", "#db8a70"];
   const grouped = new Map<string, Profile[]>();
   profiles.forEach((person) => grouped.set(person.cohort, [...(grouped.get(person.cohort) ?? []), person]));
+  const cohortNumber = (value: string) => Number(value.match(/(\d+)\s*$/)?.[1] ?? 0);
 
   return Array.from(grouped.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
-    .slice(0, 8)
+    .sort(([a], [b]) => cohortNumber(b) - cohortNumber(a) || b.localeCompare(a))
     .map(([cohort, members], index) => ({
       cohort,
       members,
-      x: positions[index][0],
-      y: positions[index][1],
-      color: colors[index],
+      color: colors[index % colors.length],
     }));
 }
 
@@ -1077,65 +1069,77 @@ function CohortGalaxy({
 }: {
   profiles: Profile[];
   selectedCohort: string | null;
-  onSelectCohort: (cohort: string) => void;
+  onSelectCohort: (cohort: string | null) => void;
   onOpen: (profile: Profile) => void;
 }) {
   const groups = useMemo(() => buildCohortGroups(profiles), [profiles]);
+  const [cohortQuery, setCohortQuery] = useState("");
+  const sectionRefs = useRef(new Map<string, HTMLElement>());
+
+  const focusCohort = (group: CohortGroup) => {
+    onSelectCohort(group.cohort);
+    sectionRefs.current.get(group.cohort)?.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
+  const searchCohort = (event: FormEvent) => {
+    event.preventDefault();
+    const query = cohortQuery.trim().toLowerCase();
+    if (!query) return;
+    const normalized = normalizeCohort(cohortQuery).toLowerCase();
+    const match = groups.find((group) => group.cohort.toLowerCase() === normalized)
+      ?? groups.find((group) => group.cohort.toLowerCase().includes(query));
+    if (match) {
+      setCohortQuery(match.cohort);
+      focusCohort(match);
+    }
+  };
 
   return (
-    <>
-      <div className="cohort-bridge bridge-top" />
-      <div className="cohort-bridge bridge-bottom" />
-      <div className="cohort-bridge bridge-center" />
-      {groups.map((group, groupIndex) => {
-        const selected = selectedCohort === group.cohort;
-        const dimmed = selectedCohort !== null && !selected;
-        const clusterStyle = {
-          "--cluster-left": `calc(50% + ${group.x}px)`,
-          "--cluster-top": `calc(50% + ${group.y}px)`,
-          "--cluster-color": group.color,
-          "--cluster-delay": `${groupIndex * 85}ms`,
-        } as CSSProperties;
-
-        return (
-          <section
-            key={group.cohort}
-            className={`cohort-cluster ${selected ? "is-selected" : ""} ${dimmed ? "is-dimmed" : ""}`}
-            style={clusterStyle}
-            aria-label={`${group.cohort}, ${group.members.length} personas`}
-          >
-            <button className="cohort-cluster-center" type="button" onClick={() => onSelectCohort(group.cohort)}>
-              <span>Promoción</span>
-              <strong>{group.cohort.replace("Promoción ", "")}</strong>
-              <small>{group.members.length} personas</small>
-            </button>
-            <div className="cluster-orbit-ring" />
-            {group.members.slice(0, 7).map((member, memberIndex, members) => {
-              const angle = (Math.PI * 2 * memberIndex) / members.length - Math.PI / 2;
-              const radius = selected ? 94 : 78;
-              const memberStyle = {
-                "--member-x": `${Math.cos(angle) * radius}px`,
-                "--member-y": `${Math.sin(angle) * radius}px`,
-                "--member-delay": `${groupIndex * -0.45 - memberIndex * 0.2}s`,
-              } as CSSProperties;
-              return (
-                <button
-                  className="cohort-member"
-                  key={member.id}
-                  style={memberStyle}
-                  type="button"
-                  title={`${member.full_name} · ${member.profession ?? group.cohort}`}
-                  onClick={() => onOpen(member)}
-                >
-                  <Avatar profile={member} size="small" />
-                  <span>{firstName(member.full_name)}</span>
+    <div className="cohort-stack-shell">
+      <form className="cohort-search" onSubmit={searchCohort}>
+        <label><Search size={15} /><input aria-label="Buscar promoción Lima" list="cohort-options" value={cohortQuery} onChange={(event) => setCohortQuery(event.target.value)} placeholder="Buscar tu Lima…" /></label>
+        <datalist id="cohort-options">{groups.map((group) => <option key={group.cohort} value={group.cohort} />)}</datalist>
+        <button type="submit"><LocateFixed size={15} /> Centrar</button>
+      </form>
+      <div className="cohort-stack-scroll">
+        <div className="cohort-stack">
+          {groups.map((group, groupIndex) => {
+            const selected = selectedCohort === group.cohort;
+            const dimmed = selectedCohort !== null && !selected;
+            return (
+              <section
+                key={group.cohort}
+                ref={(node) => { if (node) sectionRefs.current.set(group.cohort, node); else sectionRefs.current.delete(group.cohort); }}
+                className={`cohort-stack-section ${selected ? "is-selected" : ""} ${dimmed ? "is-dimmed" : ""}`}
+                style={{ "--cluster-color": group.color, "--cluster-delay": `${groupIndex * 70}ms` } as CSSProperties}
+                aria-label={`${group.cohort}, ${group.members.length} personas`}
+              >
+                {groupIndex === 0 && <span className="cohort-latest-badge"><Sparkles size={12} /> Lima más actual</span>}
+                <button className="cohort-stack-center" type="button" onClick={() => onSelectCohort(selected ? null : group.cohort)}>
+                  <span>Promoción</span>
+                  <strong>{group.cohort}</strong>
+                  <small>{group.members.length} personas</small>
                 </button>
-              );
-            })}
-          </section>
-        );
-      })}
-    </>
+                <div className="cohort-members-grid">
+                  {group.members.map((member, memberIndex) => (
+                    <button
+                      className="cohort-stack-member"
+                      key={member.id}
+                      style={{ "--member-delay": `${groupIndex * -0.35 - memberIndex * 0.08}s` } as CSSProperties}
+                      type="button"
+                      title={`${member.full_name} · ${member.profession ?? group.cohort}`}
+                      onClick={() => onOpen(member)}
+                    >
+                      <Avatar profile={member} size="small" />
+                      <span>{firstName(member.full_name)}</span>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            );
+          })}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1160,6 +1164,7 @@ function Connections({ profile, profiles, onOpen }: { profile: Profile; profiles
   };
   const adjustZoom = (amount: number) => setZoom((current) => Math.min(1.35, Math.max(0.55, current + amount)));
   const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (networkMode === "cohorts") return;
     if ((event.target as HTMLElement).closest(".living-node, .cohort-cluster, .network-controls, .network-story-card, .network-mode-switch")) return;
     dragRef.current = { x: event.clientX, y: event.clientY, panX: pan.x, panY: pan.y };
     setDragging(true);
@@ -1180,12 +1185,12 @@ function Connections({ profile, profiles, onOpen }: { profile: Profile; profiles
   return (
     <div className="connections-page living-connections page-enter">
       <section
-        className={`living-canvas ${dragging ? "is-dragging" : ""}`}
+        className={`living-canvas ${dragging ? "is-dragging" : ""} ${networkMode === "cohorts" ? "is-cohort-mode" : ""}`}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
-        onWheel={(event) => adjustZoom(event.deltaY > 0 ? -0.06 : 0.06)}
+        onWheel={networkMode === "lineage" ? (event) => adjustZoom(event.deltaY > 0 ? -0.06 : 0.06) : undefined}
         aria-label="Mapa interactivo de conexiones"
       >
         <div className="living-grid" />
@@ -1198,8 +1203,8 @@ function Connections({ profile, profiles, onOpen }: { profile: Profile; profiles
         <header className="living-header">
           <div>
             <span className="living-kicker"><Sparkles size={13} /> {networkMode === "lineage" ? "TU CONSTELACIÓN" : "NUESTRA COMUNIDAD"}</span>
-            <h1>{networkMode === "lineage" ? <>Tu árbol está <em>vivo.</em></> : <><em>40 personas</em>, 8 promociones.</>}</h1>
-            {networkMode === "lineage" && <p>Arrastra para explorar · usa la rueda para acercarte · selecciona una persona para conocer su historia.</p>}
+            <h1>{networkMode === "lineage" ? <>Tu árbol está <em>vivo.</em></> : <><em>{profiles.length} personas</em>, {cohortGroups.length} promociones.</>}</h1>
+            <p>{networkMode === "lineage" ? "Arrastra para explorar · usa la rueda para acercarte · selecciona una persona para conocer su historia." : "El Lima más actual aparece primero · baja con la rueda para recorrer las promociones."}</p>
           </div>
           <div className="living-count"><strong>{networkMode === "lineage" ? network.points.length : profiles.length}</strong><span>personas en<br />{networkMode === "lineage" ? "tu linaje" : "la comunidad"}</span></div>
         </header>
@@ -1209,22 +1214,22 @@ function Connections({ profile, profiles, onOpen }: { profile: Profile; profiles
           <button type="button" className={networkMode === "cohorts" ? "active" : ""} onClick={() => changeMode("cohorts")}><Users size={14} /> Por promociones <span>{cohortGroups.length}</span></button>
         </div>
 
-        <div className="network-controls" aria-label="Controles del mapa">
+        {networkMode === "lineage" && <div className="network-controls" aria-label="Controles del mapa">
           <button type="button" onClick={() => adjustZoom(0.12)} aria-label="Acercar"><Plus size={17} /></button>
           <button type="button" onClick={() => adjustZoom(-0.12)} aria-label="Alejar"><Minus size={17} /></button>
           <button type="button" onClick={resetView} aria-label="Centrar mapa"><LocateFixed size={17} /></button>
           <span><Move size={14} /> {Math.round(zoom * 100)}%</span>
-        </div>
+        </div>}
 
-        <div
-          className="living-world"
-          style={{
-            "--network-pan-x": `${pan.x}px`,
-            "--network-pan-y": `${pan.y}px`,
-            "--network-scale": zoom,
-          } as CSSProperties}
-        >
-          {networkMode === "lineage" ? (
+        {networkMode === "lineage" ? (
+          <div
+            className="living-world"
+            style={{
+              "--network-pan-x": `${pan.x}px`,
+              "--network-pan-y": `${pan.y}px`,
+              "--network-scale": zoom,
+            } as CSSProperties}
+          >
             <>
               <div className="world-orbit orbit-one" />
               <div className="world-orbit orbit-two" />
@@ -1232,10 +1237,10 @@ function Connections({ profile, profiles, onOpen }: { profile: Profile; profiles
               {network.edges.map((edge, index) => <LivingEdge key={`${edge.from.profile.id}-${edge.to.profile.id}`} edge={edge} index={index} />)}
               {network.points.map((point) => <LivingNode key={point.profile.id} point={point} onOpen={onOpen} />)}
             </>
-          ) : (
-            <CohortGalaxy profiles={profiles} selectedCohort={selectedCohort} onSelectCohort={(value) => setSelectedCohort((current) => current === value ? null : value)} onOpen={onOpen} />
-          )}
-        </div>
+          </div>
+        ) : (
+          <CohortGalaxy profiles={profiles} selectedCohort={selectedCohort} onSelectCohort={setSelectedCohort} onOpen={onOpen} />
+        )}
 
         {networkMode === "lineage" && (
           <aside className="network-story-card">
@@ -1252,7 +1257,7 @@ function Connections({ profile, profiles, onOpen }: { profile: Profile; profiles
         <div className="living-legend">
           <span><i className="legend-coral" /> {networkMode === "lineage" ? "Conexión directa" : "Promoción seleccionada"}</span>
           <span><i className="legend-sage" /> {networkMode === "lineage" ? "Rama extendida" : "Órbitas de personas"}</span>
-          <span className="drag-hint"><Move size={13} /> Arrastra el lienzo</span>
+          <span className="drag-hint"><Move size={13} /> {networkMode === "lineage" ? "Arrastra el lienzo" : "Rueda para recorrer"}</span>
         </div>
       </section>
     </div>
