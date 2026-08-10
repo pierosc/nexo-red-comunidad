@@ -714,6 +714,7 @@ function Workspace({
   const navigate = (next: View) => {
     setView(next);
     setMobileNav(false);
+    if (next === "connections") setSidebarCollapsed(true);
     if (next === "profile") setSelected(displayProfile);
   };
 
@@ -1057,6 +1058,13 @@ type CohortConnectionLayout = {
   toCohort: string;
 };
 
+type CohortFocusTarget = {
+  x: number;
+  y: number;
+  width: number;
+  worldTop: number;
+};
+
 function buildCohortGroups(profiles: Profile[]): CohortGroup[] {
   const colors = ["#ef745b", "#e8a65b", "#a4bb91", "#72a9a1", "#7095bd", "#9b86bd", "#c67f9f", "#db8a70"];
   const grouped = new Map<string, Profile[]>();
@@ -1075,12 +1083,18 @@ function buildCohortGroups(profiles: Profile[]): CohortGroup[] {
 function CohortGalaxy({
   profiles,
   selectedCohort,
+  pan,
+  zoom,
   onSelectCohort,
+  onCenterCohort,
   onOpen,
 }: {
   profiles: Profile[];
   selectedCohort: string | null;
+  pan: { x: number; y: number };
+  zoom: number;
   onSelectCohort: (cohort: string | null) => void;
+  onCenterCohort: (target: CohortFocusTarget) => void;
   onOpen: (profile: Profile) => void;
 }) {
   const groups = useMemo(() => buildCohortGroups(profiles), [profiles]);
@@ -1089,8 +1103,10 @@ function CohortGalaxy({
   const [hoveredProfileId, setHoveredProfileId] = useState<string | null>(null);
   const [connectionLayout, setConnectionLayout] = useState<{ width: number; height: number; edges: CohortConnectionLayout[] }>({ width: 0, height: 0, edges: [] });
   const stackRef = useRef<HTMLDivElement>(null);
+  const worldRef = useRef<HTMLDivElement>(null);
   const sectionRefs = useRef(new Map<string, HTMLElement>());
   const memberRefs = useRef(new Map<string, HTMLButtonElement>());
+  const didCenterLatest = useRef(false);
 
   useEffect(() => {
     const stack = stackRef.current;
@@ -1109,24 +1125,24 @@ function CohortGalaxy({
 
         const from = fromNode.getBoundingClientRect();
         const to = toNode.getBoundingClientRect();
-        const fromCenter = { x: from.left - stackBounds.left + from.width / 2, y: from.top - stackBounds.top + from.height / 2 };
-        const toCenter = { x: to.left - stackBounds.left + to.width / 2, y: to.top - stackBounds.top + to.height / 2 };
+        const fromCenter = { x: (from.left - stackBounds.left + from.width / 2) / zoom, y: (from.top - stackBounds.top + from.height / 2) / zoom };
+        const toCenter = { x: (to.left - stackBounds.left + to.width / 2) / zoom, y: (to.top - stackBounds.top + to.height / 2) / zoom };
         const mostlyVertical = Math.abs(toCenter.y - fromCenter.y) >= 80;
         let d: string;
 
         if (mostlyVertical) {
           const direction = toCenter.y >= fromCenter.y ? 1 : -1;
           const x1 = fromCenter.x;
-          const y1 = fromCenter.y + direction * from.height / 2;
+          const y1 = fromCenter.y + direction * from.height / zoom / 2;
           const x2 = toCenter.x;
-          const y2 = toCenter.y - direction * to.height / 2;
+          const y2 = toCenter.y - direction * to.height / zoom / 2;
           const midY = (y1 + y2) / 2;
           d = `M ${x1.toFixed(1)} ${y1.toFixed(1)} C ${x1.toFixed(1)} ${midY.toFixed(1)}, ${x2.toFixed(1)} ${midY.toFixed(1)}, ${x2.toFixed(1)} ${y2.toFixed(1)}`;
         } else {
           const direction = toCenter.x >= fromCenter.x ? 1 : -1;
-          const x1 = fromCenter.x + direction * from.width / 2;
+          const x1 = fromCenter.x + direction * from.width / zoom / 2;
           const y1 = fromCenter.y;
-          const x2 = toCenter.x - direction * to.width / 2;
+          const x2 = toCenter.x - direction * to.width / zoom / 2;
           const y2 = toCenter.y;
           const distance = x2 - x1;
           const controlY = Math.min(y1, y2) - Math.max(28, Math.abs(distance) * 0.12);
@@ -1160,7 +1176,7 @@ function CohortGalaxy({
       observer.disconnect();
       window.removeEventListener("resize", scheduleMeasurement);
     };
-  }, [profileById, profiles]);
+  }, [profileById, profiles, zoom]);
 
   const relatedProfileIds = useMemo(() => {
     const ids = new Set<string>();
@@ -1173,9 +1189,31 @@ function CohortGalaxy({
     return ids;
   }, [hoveredProfileId, profiles]);
 
+  const centerCohort = useCallback((group: CohortGroup) => {
+    const section = sectionRefs.current.get(group.cohort);
+    const stack = stackRef.current;
+    const world = worldRef.current;
+    if (!section || !stack || !world) return false;
+    onCenterCohort({
+      x: section.offsetLeft + section.offsetWidth / 2,
+      y: section.offsetTop + section.offsetHeight / 2,
+      width: stack.offsetWidth,
+      worldTop: world.offsetTop,
+    });
+    return true;
+  }, [onCenterCohort]);
+
+  useEffect(() => {
+    if (didCenterLatest.current || !groups[0]) return;
+    const frame = requestAnimationFrame(() => {
+      if (centerCohort(groups[0])) didCenterLatest.current = true;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [centerCohort, groups]);
+
   const focusCohort = (group: CohortGroup) => {
     onSelectCohort(group.cohort);
-    sectionRefs.current.get(group.cohort)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    centerCohort(group);
   };
   const searchCohort = (event: FormEvent) => {
     event.preventDefault();
@@ -1197,7 +1235,15 @@ function CohortGalaxy({
         <datalist id="cohort-options">{groups.map((group) => <option key={group.cohort} value={group.cohort} />)}</datalist>
         <button type="submit"><LocateFixed size={15} /> Centrar</button>
       </form>
-      <div className="cohort-stack-scroll">
+      <div
+        className="cohort-stack-scroll"
+        ref={worldRef}
+        style={{
+          "--network-pan-x": `${pan.x}px`,
+          "--network-pan-y": `${pan.y}px`,
+          "--network-scale": zoom,
+        } as CSSProperties}
+      >
         <div className="cohort-stack" ref={stackRef}>
           {connectionLayout.width > 0 && <svg className="cohort-connection-layer" width={connectionLayout.width} height={connectionLayout.height} viewBox={`0 0 ${connectionLayout.width} ${connectionLayout.height}`} aria-hidden="true">
             <defs>
@@ -1266,6 +1312,7 @@ function Connections({ profile, profiles, onOpen }: { profile: Profile; profiles
   const [zoom, setZoom] = useState(0.82);
   const [pan, setPan] = useState({ x: 0, y: 35 });
   const [dragging, setDragging] = useState(false);
+  const canvasRef = useRef<HTMLElement>(null);
   const dragRef = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
 
   const resetView = () => {
@@ -1278,14 +1325,21 @@ function Connections({ profile, profiles, onOpen }: { profile: Profile; profiles
     resetView();
   };
   const adjustZoom = (amount: number) => setZoom((current) => Math.min(1.35, Math.max(0.55, current + amount)));
-  const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (networkMode === "cohorts") return;
-    if ((event.target as HTMLElement).closest(".living-node, .cohort-cluster, .network-controls, .network-story-card, .network-mode-switch")) return;
+  const centerCohort = useCallback((target: CohortFocusTarget) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    setPan({
+      x: -zoom * (target.x - target.width / 2),
+      y: canvas.clientHeight / 2 - target.worldTop - zoom * target.y,
+    });
+  }, [zoom]);
+  const handlePointerDown = (event: ReactPointerEvent<HTMLElement>) => {
+    if ((event.target as HTMLElement).closest(".living-node, .cohort-stack-member, .cohort-stack-center, .cohort-search, .network-controls, .network-story-card, .network-mode-switch")) return;
     dragRef.current = { x: event.clientX, y: event.clientY, panX: pan.x, panY: pan.y };
     setDragging(true);
     event.currentTarget.setPointerCapture(event.pointerId);
   };
-  const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+  const handlePointerMove = (event: ReactPointerEvent<HTMLElement>) => {
     if (!dragRef.current) return;
     setPan({
       x: dragRef.current.panX + event.clientX - dragRef.current.x,
@@ -1300,12 +1354,16 @@ function Connections({ profile, profiles, onOpen }: { profile: Profile; profiles
   return (
     <div className="connections-page living-connections page-enter">
       <section
+        ref={canvasRef}
         className={`living-canvas ${dragging ? "is-dragging" : ""} ${networkMode === "cohorts" ? "is-cohort-mode" : ""}`}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
-        onWheel={networkMode === "lineage" ? (event) => adjustZoom(event.deltaY > 0 ? -0.06 : 0.06) : undefined}
+        onWheel={(event) => {
+          event.preventDefault();
+          adjustZoom(event.deltaY > 0 ? -0.06 : 0.06);
+        }}
         aria-label="Mapa interactivo de conexiones"
       >
         <div className="living-grid" />
@@ -1319,7 +1377,7 @@ function Connections({ profile, profiles, onOpen }: { profile: Profile; profiles
           <div>
             <span className="living-kicker"><Sparkles size={13} /> {networkMode === "lineage" ? "TU CONSTELACIÓN" : "NUESTRA COMUNIDAD"}</span>
             <h1>{networkMode === "lineage" ? <>Tu árbol está <em>vivo.</em></> : <><em>{profiles.length} personas</em>, {cohortGroups.length} promociones.</>}</h1>
-            <p>{networkMode === "lineage" ? "Arrastra para explorar · usa la rueda para acercarte · selecciona una persona para conocer su historia." : "El Lima más actual aparece primero · baja con la rueda para recorrer las promociones."}</p>
+            <p>{networkMode === "lineage" ? "Arrastra para explorar · usa la rueda para acercarte · selecciona una persona para conocer su historia." : "Arrastra para recorrer los Limas · usa la rueda para acercar o alejar · las flechas muestran quién enroló a quién."}</p>
           </div>
           <div className="living-count"><strong>{networkMode === "lineage" ? network.points.length : profiles.length}</strong><span>personas en<br />{networkMode === "lineage" ? "tu linaje" : "la comunidad"}</span></div>
         </header>
@@ -1329,12 +1387,12 @@ function Connections({ profile, profiles, onOpen }: { profile: Profile; profiles
           <button type="button" className={networkMode === "cohorts" ? "active" : ""} onClick={() => changeMode("cohorts")}><Users size={14} /> Por promociones <span>{cohortGroups.length}</span></button>
         </div>
 
-        {networkMode === "lineage" && <div className="network-controls" aria-label="Controles del mapa">
+        <div className="network-controls" aria-label="Controles del mapa">
           <button type="button" onClick={() => adjustZoom(0.12)} aria-label="Acercar"><Plus size={17} /></button>
           <button type="button" onClick={() => adjustZoom(-0.12)} aria-label="Alejar"><Minus size={17} /></button>
           <button type="button" onClick={resetView} aria-label="Centrar mapa"><LocateFixed size={17} /></button>
           <span><Move size={14} /> {Math.round(zoom * 100)}%</span>
-        </div>}
+        </div>
 
         {networkMode === "lineage" ? (
           <div
@@ -1354,7 +1412,7 @@ function Connections({ profile, profiles, onOpen }: { profile: Profile; profiles
             </>
           </div>
         ) : (
-          <CohortGalaxy profiles={profiles} selectedCohort={selectedCohort} onSelectCohort={setSelectedCohort} onOpen={onOpen} />
+          <CohortGalaxy profiles={profiles} selectedCohort={selectedCohort} pan={pan} zoom={zoom} onSelectCohort={setSelectedCohort} onCenterCohort={centerCohort} onOpen={onOpen} />
         )}
 
         {networkMode === "lineage" && (
@@ -1372,7 +1430,7 @@ function Connections({ profile, profiles, onOpen }: { profile: Profile; profiles
         <div className="living-legend">
           <span><i className="legend-coral" /> {networkMode === "lineage" ? "Conexión directa" : "Enroló a (flecha)"}</span>
           <span><i className="legend-sage" /> {networkMode === "lineage" ? "Rama extendida" : "Conexión entre Limas"}</span>
-          <span className="drag-hint"><Move size={13} /> {networkMode === "lineage" ? "Arrastra el lienzo" : "Rueda para recorrer"}</span>
+          <span className="drag-hint"><Move size={13} /> Arrastra el lienzo · rueda para zoom</span>
         </div>
       </section>
     </div>
