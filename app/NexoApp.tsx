@@ -356,6 +356,10 @@ function clampPhotoValue(value: number | null | undefined, min: number, max: num
   return Number.isFinite(numeric) ? Math.min(max, Math.max(min, numeric)) : fallback;
 }
 
+function normalizePhotoPosition(value: number | null | undefined) {
+  return Math.round(clampPhotoValue(value, 0, 100, 50));
+}
+
 function initials(name: string) {
   return name
     .split(" ")
@@ -448,8 +452,8 @@ function useProfiles(userId: string, config: NexoConfig, getToken?: () => Promis
         clerk_user_id: userId,
         photo_url: normalizePhotoUrl(draft.photo_url),
         photo_zoom: clampPhotoValue(draft.photo_zoom, 1, 2, 1),
-        photo_position_x: clampPhotoValue(draft.photo_position_x, 0, 100, 50),
-        photo_position_y: clampPhotoValue(draft.photo_position_y, 0, 100, 50),
+        photo_position_x: normalizePhotoPosition(draft.photo_position_x),
+        photo_position_y: normalizePhotoPosition(draft.photo_position_y),
         bio: draft.bio || null,
         cohort: normalizeCohort(draft.cohort),
         birth_date: draft.birth_date || null,
