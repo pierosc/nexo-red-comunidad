@@ -58,7 +58,7 @@ import {
 
 type View = "home" | "directory" | "connections" | "profile";
 
-const APP_VERSION = "1.0.23";
+const APP_VERSION = "1.0.24";
 
 export type Profile = {
   id: string;
@@ -585,6 +585,7 @@ function ClerkExperience({ config }: { config: NexoConfig }) {
         action={
           <SignInButton
             mode="modal"
+            oauthFlow="popup"
             forceRedirectUrl={config.appUrl || "/"}
             fallbackRedirectUrl={config.appUrl || "/"}
           >
