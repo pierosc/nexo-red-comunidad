@@ -19,6 +19,7 @@ import {
   ChevronDown,
   ChevronRight,
   CircleUserRound,
+  Eye,
   Home,
   Heart,
   Image as ImageIcon,
@@ -55,7 +56,7 @@ import {
 
 type View = "home" | "directory" | "connections" | "profile";
 
-const APP_VERSION = "1.0.18";
+const APP_VERSION = "1.0.19";
 
 export type Profile = {
   id: string;
@@ -773,7 +774,7 @@ function Workspace({
     setView(next);
     setMobileNav(false);
     if (next === "connections") setSidebarCollapsed(true);
-    if (next === "profile") setSelected(displayProfile);
+    if (next === "profile") setSelected(null);
   };
 
   if (live && loading) return <LoadingScreen />;
@@ -1517,7 +1518,7 @@ function MyProfile({ profile, profiles, onEdit, onOpen }: { profile: Profile; pr
   const enrolled = profiles.filter((person) => person.enrolled_by_id === profile.id);
   return (
     <div className="my-profile page-enter">
-      <div className="profile-cover"><CoverMedia profile={profile} /><button className="edit-profile-button" onClick={onEdit}><UserRoundPen size={17} /> Editar perfil</button></div>
+      <div className="profile-cover"><CoverMedia profile={profile} /><div className="profile-cover-actions"><button className="preview-profile-button" onClick={() => onOpen(profile)}><Eye size={17} /> Preview</button><button className="edit-profile-button" onClick={onEdit}><UserRoundPen size={17} /> Editar perfil</button></div></div>
       <div className="profile-main-card">
         <Avatar profile={profile} size="hero" />
         <div className="identity"><span className="cohort-pill">{profile.cohort}</span><h1>{profile.full_name}</h1><p>{profile.profession}</p><div><span><MapPin size={15} /> {profile.city}, {profile.country}</span><span><CalendarDays size={15} /> {formatBirthDate(profile.birth_date)}</span></div></div>
