@@ -382,9 +382,12 @@ function formatBirthDate(value: string | null) {
 function Avatar({ profile, size = "medium" }: { profile: Profile; size?: "small" | "medium" | "large" | "hero" }) {
   const photoUrl = normalizePhotoUrl(profile.photo_url);
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const photoPositionX = clampPhotoValue(profile.photo_position_x, 0, 100, 50);
+  const photoPositionY = clampPhotoValue(profile.photo_position_y, 0, 100, 50);
   const photoStyle: CSSProperties = {
-    objectPosition: `${clampPhotoValue(profile.photo_position_x, 0, 100, 50)}% ${clampPhotoValue(profile.photo_position_y, 0, 100, 50)}%`,
+    objectPosition: `${photoPositionX}% ${photoPositionY}%`,
     transform: `scale(${clampPhotoValue(profile.photo_zoom, 1, 2, 1)})`,
+    transformOrigin: `${photoPositionX}% ${photoPositionY}%`,
   };
   return (
     <div className={`avatar avatar-${size}`} aria-label={`Foto de ${profile.full_name}`}>
@@ -1360,7 +1363,10 @@ function PhotoAdjustmentDialog({ profile, draft, update, onClose }: { profile: P
   const moveDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (!drag.current || drag.current.pointerId !== event.pointerId) return;
     event.preventDefault();
-    const sensitivity = 1.6;
+    const previewSize = event.currentTarget.querySelector<HTMLElement>(".avatar")?.offsetWidth ?? 240;
+    const zoom = clampPhotoValue(draft.photo_zoom, 1, 2, 1);
+    const availableTravel = Math.max((zoom - 1) * previewSize, previewSize * 0.25);
+    const sensitivity = clampPhotoValue(100 / availableTravel, 0.4, 1.8, 0.8);
     const nextX = clampPhotoValue(drag.current.x - (event.clientX - drag.current.clientX) * sensitivity, 0, 100, 50);
     const nextY = clampPhotoValue(drag.current.y - (event.clientY - drag.current.clientY) * sensitivity, 0, 100, 50);
 
