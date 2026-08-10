@@ -21,10 +21,12 @@ import {
   CircleUserRound,
   Home,
   Heart,
+  Image as ImageIcon,
   Link2,
   LocateFixed,
   MapPin,
   Minus,
+  Moon,
   Move,
   Network,
   Pencil,
@@ -35,6 +37,7 @@ import {
   Search,
   ShieldCheck,
   Sparkles,
+  Sun,
   UserRoundPen,
   Users,
   X,
@@ -52,7 +55,7 @@ import {
 
 type View = "home" | "directory" | "connections" | "profile";
 
-const APP_VERSION = "1.0.17";
+const APP_VERSION = "1.0.18";
 
 export type Profile = {
   id: string;
@@ -62,6 +65,10 @@ export type Profile = {
   photo_zoom?: number | null;
   photo_position_x?: number | null;
   photo_position_y?: number | null;
+  cover_url?: string | null;
+  cover_zoom?: number | null;
+  cover_position_x?: number | null;
+  cover_position_y?: number | null;
   bio: string | null;
   cohort: string;
   birth_date: string | null;
@@ -84,6 +91,10 @@ type ProfileDraft = Pick<
   | "photo_zoom"
   | "photo_position_x"
   | "photo_position_y"
+  | "cover_url"
+  | "cover_zoom"
+  | "cover_position_x"
+  | "cover_position_y"
   | "bio"
   | "cohort"
   | "birth_date"
@@ -297,6 +308,10 @@ const emptyDraft: ProfileDraft = {
   photo_zoom: 1,
   photo_position_x: 50,
   photo_position_y: 50,
+  cover_url: null,
+  cover_zoom: 1,
+  cover_position_x: 50,
+  cover_position_y: 50,
   bio: "",
   cohort: "",
   birth_date: "",
@@ -406,6 +421,27 @@ function Avatar({ profile, size = "medium" }: { profile: Profile; size?: "small"
   );
 }
 
+function CoverMedia({ profile }: { profile: Profile }) {
+  const coverUrl = normalizePhotoUrl(profile.cover_url);
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const positionX = clampPhotoValue(profile.cover_position_x, 0, 100, 50);
+  const positionY = clampPhotoValue(profile.cover_position_y, 0, 100, 50);
+  const coverStyle: CSSProperties = {
+    objectPosition: `${positionX}% ${positionY}%`,
+    transform: `scale(${clampPhotoValue(profile.cover_zoom, 1, 2, 1)})`,
+    transformOrigin: `${positionX}% ${positionY}%`,
+  };
+
+  if (!coverUrl || failedUrl === coverUrl) return <div className="cover-media-frame"><div className="cover-pattern" /></div>;
+  return (
+    <div className="cover-media-frame">
+      {/* Cover images are user-provided remote URLs. */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img className="cover-media" src={coverUrl} alt="" style={coverStyle} onError={() => setFailedUrl(coverUrl)} />
+    </div>
+  );
+}
+
 function createSupabase(config: NexoConfig, getToken: () => Promise<string | null>): SupabaseClient | null {
   if (!config.supabaseUrl || !config.supabasePublishableKey) return null;
   return createClient(config.supabaseUrl, config.supabasePublishableKey, {
@@ -454,6 +490,10 @@ function useProfiles(userId: string, config: NexoConfig, getToken?: () => Promis
         photo_zoom: clampPhotoValue(draft.photo_zoom, 1, 2, 1),
         photo_position_x: normalizePhotoPosition(draft.photo_position_x),
         photo_position_y: normalizePhotoPosition(draft.photo_position_y),
+        cover_url: normalizePhotoUrl(draft.cover_url),
+        cover_zoom: clampPhotoValue(draft.cover_zoom, 1, 2, 1),
+        cover_position_x: normalizePhotoPosition(draft.cover_position_x),
+        cover_position_y: normalizePhotoPosition(draft.cover_position_y),
         bio: draft.bio || null,
         cohort: normalizeCohort(draft.cohort),
         birth_date: draft.birth_date || null,
@@ -671,6 +711,20 @@ function Workspace({
   const [editing, setEditing] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      const saved = window.localStorage.getItem("nexo-theme");
+      const preferred = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+      setTheme(saved === "dark" || saved === "light" ? saved : preferred);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, []);
+  const toggleTheme = () => setTheme((current) => {
+    const next = current === "dark" ? "light" : "dark";
+    window.localStorage.setItem("nexo-theme", next);
+    return next;
+  });
   const currentProfile = profiles.find((profile) => profile.clerk_user_id === userId);
   const displayProfile = currentProfile ?? (live ? {
     id: "",
@@ -680,6 +734,10 @@ function Workspace({
     photo_zoom: 1,
     photo_position_x: 50,
     photo_position_y: 50,
+    cover_url: null,
+    cover_zoom: 1,
+    cover_position_x: 50,
+    cover_position_y: 50,
     bio: null,
     cohort: "",
     birth_date: null,
@@ -732,7 +790,7 @@ function Workspace({
   }
 
   return (
-    <div className={`workspace ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
+    <div className={`workspace theme-${theme} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`} style={{ colorScheme: theme }}>
       <aside className={`sidebar ${mobileNav ? "sidebar-open" : ""}`}>
         <div className="sidebar-brand">
           <Brand inverse />
@@ -763,9 +821,9 @@ function Workspace({
           <label className="global-search">
             <Search size={18} />
             <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar personas, promociones..." />
-            <kbd>⌘ K</kbd>
           </label>
           <div className="topbar-actions">
+            <button className="theme-toggle" type="button" onClick={toggleTheme} aria-label={theme === "dark" ? "Usar modo claro" : "Usar modo oscuro"} title={theme === "dark" ? "Modo claro" : "Modo oscuro"}>{theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}</button>
             <div className="account-summary">
               <div><strong>{firstName(displayProfile.full_name)}</strong><span>{displayProfile.cohort}</span></div>
               {accountControl}
@@ -1459,7 +1517,7 @@ function MyProfile({ profile, profiles, onEdit, onOpen }: { profile: Profile; pr
   const enrolled = profiles.filter((person) => person.enrolled_by_id === profile.id);
   return (
     <div className="my-profile page-enter">
-      <div className="profile-cover"><div className="cover-pattern" /><button className="edit-profile-button" onClick={onEdit}><UserRoundPen size={17} /> Editar perfil</button></div>
+      <div className="profile-cover"><CoverMedia profile={profile} /><button className="edit-profile-button" onClick={onEdit}><UserRoundPen size={17} /> Editar perfil</button></div>
       <div className="profile-main-card">
         <Avatar profile={profile} size="hero" />
         <div className="identity"><span className="cohort-pill">{profile.cohort}</span><h1>{profile.full_name}</h1><p>{profile.profession}</p><div><span><MapPin size={15} /> {profile.city}, {profile.country}</span><span><CalendarDays size={15} /> {formatBirthDate(profile.birth_date)}</span></div></div>
@@ -1483,7 +1541,7 @@ function ProfilePanel({ profile, profiles, isOwn, onClose, onOpen, onEdit }: { p
     <div className="overlay" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}>
       <aside className="profile-panel" role="dialog" aria-modal="true" aria-label={`Perfil de ${profile.full_name}`}>
         <button className="close-button" onClick={onClose} aria-label="Cerrar perfil"><X /></button>
-        <div className="panel-hero"><div className="panel-pattern" /><Avatar profile={profile} size="hero" /></div>
+        <div className="panel-hero"><CoverMedia profile={profile} /><Avatar profile={profile} size="hero" /></div>
         <div className="panel-body">
           <span className="cohort-pill">{profile.cohort}</span>
           <h2>{profile.full_name}</h2>
@@ -1536,17 +1594,50 @@ function ProfilePhotoEditor({ profile, draft, update }: { profile: Profile; draf
         <label><Camera size={16} /><span>Enlace público de tu foto</span><input type="url" value={draft.photo_url ?? ""} onChange={(event) => update("photo_url", event.target.value)} placeholder="https://drive.google.com/file/d/…" />{previewUrl && <a href={previewUrl} target="_blank" rel="noreferrer">Comprobar imagen directa <ArrowUpRight size={13} /></a>}</label>
       </div>
       <PhotoLinkGuide />
-      {adjusting && <PhotoAdjustmentDialog profile={previewProfile} draft={draft} update={update} onClose={() => setAdjusting(false)} />}
+      {adjusting && <ImageAdjustmentDialog kind="photo" profile={previewProfile} draft={draft} update={update} onClose={() => setAdjusting(false)} />}
     </div>
   );
 }
 
-function PhotoAdjustmentDialog({ profile, draft, update, onClose }: { profile: Profile; draft: ProfileDraft; update: DraftUpdater; onClose: () => void }) {
+function ProfileCoverEditor({ profile, draft, update }: { profile: Profile; draft: ProfileDraft; update: DraftUpdater }) {
+  const [adjusting, setAdjusting] = useState(false);
+  const previewUrl = normalizePhotoUrl(draft.cover_url);
+  const previewProfile: Profile = {
+    ...profile,
+    cover_url: previewUrl,
+    cover_zoom: draft.cover_zoom,
+    cover_position_x: draft.cover_position_x,
+    cover_position_y: draft.cover_position_y,
+  };
+
+  return (
+    <div className="cover-editor-block">
+      <div className="cover-field">
+        <div className="cover-preview-wrap">
+          <div className="cover-preview-action"><CoverMedia profile={previewProfile} />{previewUrl && <button type="button" onClick={() => setAdjusting(true)} aria-label="Ajustar encuadre de la portada"><Pencil size={14} /></button>}</div>
+          <small>Vista previa de portada</small>
+        </div>
+        <label><ImageIcon size={16} /><span>Enlace público de tu portada</span><input type="url" value={draft.cover_url ?? ""} onChange={(event) => update("cover_url", event.target.value)} placeholder="https://drive.google.com/file/d/…" />{previewUrl && <a href={previewUrl} target="_blank" rel="noreferrer">Comprobar imagen directa <ArrowUpRight size={13} /></a>}</label>
+      </div>
+      <PhotoLinkGuide subject="portada" />
+      {adjusting && <ImageAdjustmentDialog kind="cover" profile={previewProfile} draft={draft} update={update} onClose={() => setAdjusting(false)} />}
+    </div>
+  );
+}
+
+function ImageAdjustmentDialog({ kind, profile, draft, update, onClose }: { kind: "photo" | "cover"; profile: Profile; draft: ProfileDraft; update: DraftUpdater; onClose: () => void }) {
+  const isCover = kind === "cover";
+  const zoomField: keyof ProfileDraft = isCover ? "cover_zoom" : "photo_zoom";
+  const xField: keyof ProfileDraft = isCover ? "cover_position_x" : "photo_position_x";
+  const yField: keyof ProfileDraft = isCover ? "cover_position_y" : "photo_position_y";
+  const zoom = clampPhotoValue(isCover ? draft.cover_zoom : draft.photo_zoom, 1, 2, 1);
+  const positionX = clampPhotoValue(isCover ? draft.cover_position_x : draft.photo_position_x, 0, 100, 50);
+  const positionY = clampPhotoValue(isCover ? draft.cover_position_y : draft.photo_position_y, 0, 100, 50);
   const drag = useRef<{ pointerId: number; clientX: number; clientY: number; x: number; y: number } | null>(null);
   const resetFrame = () => {
-    update("photo_zoom", 1);
-    update("photo_position_x", 50);
-    update("photo_position_y", 50);
+    update(zoomField, 1);
+    update(xField, 50);
+    update(yField, 50);
   };
   const startDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -1555,19 +1646,22 @@ function PhotoAdjustmentDialog({ profile, draft, update, onClose }: { profile: P
       pointerId: event.pointerId,
       clientX: event.clientX,
       clientY: event.clientY,
-      x: clampPhotoValue(draft.photo_position_x, 0, 100, 50),
-      y: clampPhotoValue(draft.photo_position_y, 0, 100, 50),
+      x: positionX,
+      y: positionY,
     };
   };
   const moveDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (!drag.current || drag.current.pointerId !== event.pointerId) return;
     event.preventDefault();
-    const previewSize = event.currentTarget.querySelector<HTMLElement>(".avatar")?.offsetWidth ?? 240;
-    const zoom = clampPhotoValue(draft.photo_zoom, 1, 2, 1);
-    const availableTravel = Math.max((zoom - 1) * previewSize, previewSize * 0.25);
-    const sensitivity = clampPhotoValue(100 / availableTravel, 0.4, 1.8, 0.8);
-    const nextX = clampPhotoValue(drag.current.x - (event.clientX - drag.current.clientX) * sensitivity, 0, 100, 50);
-    const nextY = clampPhotoValue(drag.current.y - (event.clientY - drag.current.clientY) * sensitivity, 0, 100, 50);
+    const preview = event.currentTarget.querySelector<HTMLElement>(".image-frame-window");
+    const previewWidth = preview?.offsetWidth ?? 240;
+    const previewHeight = preview?.offsetHeight ?? 240;
+    const travelX = Math.max((zoom - 1) * previewWidth, previewWidth * 0.22);
+    const travelY = Math.max((zoom - 1) * previewHeight, previewHeight * 0.22);
+    const sensitivityX = clampPhotoValue(100 / travelX, 0.25, 1.8, 0.8);
+    const sensitivityY = clampPhotoValue(100 / travelY, 0.25, 1.8, 0.8);
+    const nextX = clampPhotoValue(drag.current.x - (event.clientX - drag.current.clientX) * sensitivityX, 0, 100, 50);
+    const nextY = clampPhotoValue(drag.current.y - (event.clientY - drag.current.clientY) * sensitivityY, 0, 100, 50);
 
     drag.current = {
       ...drag.current,
@@ -1576,19 +1670,19 @@ function PhotoAdjustmentDialog({ profile, draft, update, onClose }: { profile: P
       x: nextX,
       y: nextY,
     };
-    update("photo_position_x", nextX);
-    update("photo_position_y", nextY);
+    update(xField, nextX);
+    update(yField, nextY);
   };
   const stopDrag = () => { drag.current = null; };
 
   return (
     <div className="photo-adjustment-overlay" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}>
-      <section className="photo-adjustment-dialog" role="dialog" aria-modal="true" aria-labelledby="photo-adjustment-title">
-        <header><div><span className="section-label">TU FOTO</span><h3 id="photo-adjustment-title">Ajustar encuadre</h3><p>Arrastra la foto para moverla y usa el control para acercarla.</p></div><button className="close-button" type="button" onClick={onClose} aria-label="Cerrar ajuste de foto"><X /></button></header>
+      <section className={`photo-adjustment-dialog ${isCover ? "cover-adjustment-dialog" : ""}`} role="dialog" aria-modal="true" aria-labelledby="image-adjustment-title">
+        <header><div><span className="section-label">{isCover ? "TU PORTADA" : "TU FOTO"}</span><h3 id="image-adjustment-title">Ajustar encuadre</h3><p>Arrastra la imagen para moverla y usa el control para acercarla.</p></div><button className="close-button" type="button" onClick={onClose} aria-label={`Cerrar ajuste de ${isCover ? "portada" : "foto"}`}><X /></button></header>
         <div className="photo-dialog-body">
-          <div className="photo-drag-preview" onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={stopDrag} onPointerCancel={stopDrag}><Avatar profile={{ ...profile, photo_zoom: draft.photo_zoom, photo_position_x: draft.photo_position_x, photo_position_y: draft.photo_position_y }} size="hero" /><span><Move size={15} /> Arrastra para mover</span></div>
+          <div className="photo-drag-preview" onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={stopDrag} onPointerCancel={stopDrag}><div className={`image-frame-window image-frame-window-${kind}`}>{isCover ? <CoverMedia profile={{ ...profile, cover_zoom: draft.cover_zoom, cover_position_x: draft.cover_position_x, cover_position_y: draft.cover_position_y }} /> : <Avatar profile={{ ...profile, photo_zoom: draft.photo_zoom, photo_position_x: draft.photo_position_x, photo_position_y: draft.photo_position_y }} size="hero" />}</div><span><Move size={15} /> Arrastra para mover</span></div>
           <div className="photo-dialog-controls">
-            <label><span>Zoom <b>{clampPhotoValue(draft.photo_zoom, 1, 2, 1).toFixed(2)}×</b></span><input type="range" min="1" max="2" step="0.05" value={clampPhotoValue(draft.photo_zoom, 1, 2, 1)} onChange={(event) => update("photo_zoom", Number(event.target.value))} /></label>
+            <label><span>Zoom <b>{zoom.toFixed(2)}×</b></span><input type="range" min="1" max="2" step="0.05" value={zoom} onChange={(event) => update(zoomField, Number(event.target.value))} /></label>
             <div><button className="ghost-button" type="button" onClick={resetFrame}>Recentrar</button><button className="primary-button" type="button" onClick={onClose}><Check size={16} /> Usar este encuadre</button></div>
           </div>
         </div>
@@ -1597,13 +1691,13 @@ function PhotoAdjustmentDialog({ profile, draft, update, onClose }: { profile: P
   );
 }
 
-function PhotoLinkGuide() {
+function PhotoLinkGuide({ subject = "foto" }: { subject?: "foto" | "portada" }) {
   return (
     <details className="photo-link-guide">
-      <summary><Camera size={15} /> ¿Cómo obtengo un enlace para mi foto?<ChevronDown size={15} /></summary>
+      <summary><Camera size={15} /> ¿Cómo obtengo un enlace para mi {subject}?<ChevronDown size={15} /></summary>
       <div>
         <ol>
-          <li>Sube tu foto a Google Drive, Dropbox, Imgur o Cloudinary.</li>
+          <li>Sube tu {subject} a Google Drive, Dropbox, Imgur o Cloudinary.</li>
           <li>Activa el acceso público: en Drive elige <strong>“Cualquier persona con el enlace”</strong>.</li>
           <li>Copia el enlace de Drive, pégalo arriba y ajusta el encuadre.</li>
         </ol>
@@ -1780,6 +1874,7 @@ function ProfileEditor({ profile, profiles, onClose, onSave }: { profile: Profil
         <header><div><span className="section-label">TU INFORMACIÓN</span><h2 id="editor-title">Editar perfil</h2><p>Comparte lo esencial para que tu comunidad pueda conocerte.</p></div><button className="close-button" onClick={onClose} aria-label="Cerrar editor"><X /></button></header>
         <form onSubmit={submit}>
           <ProfilePhotoEditor profile={profile} draft={draft} update={update} />
+          <ProfileCoverEditor profile={profile} draft={draft} update={update} />
           <div className="form-grid">
             <Field label="Nombre completo" required><input value={draft.full_name} onChange={(event) => update("full_name", event.target.value)} placeholder="Tu nombre y apellido" /></Field>
             <Field label="Promoción" required><CohortInput value={draft.cohort} onChange={(value) => update("cohort", value)} /></Field>
