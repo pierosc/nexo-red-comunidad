@@ -12,7 +12,6 @@ import {
   ArrowRight,
   ArrowUpRight,
   AtSign,
-  Bell,
   BookOpen,
   CalendarDays,
   Camera,
@@ -36,7 +35,6 @@ import {
   Search,
   ShieldCheck,
   Sparkles,
-  UserPlus,
   UserRoundPen,
   Users,
   X,
@@ -54,7 +52,7 @@ import {
 
 type View = "home" | "directory" | "connections" | "profile";
 
-const APP_VERSION = "1.0.16";
+const APP_VERSION = "1.0.17";
 
 export type Profile = {
   id: string;
@@ -748,12 +746,6 @@ function Workspace({
           <NavButton icon={<Network />} label="Conexiones" active={view === "connections"} onClick={() => navigate("connections")} />
           <NavButton icon={<UserRoundPen />} label="Mi perfil" active={view === "profile"} onClick={() => navigate("profile")} />
         </nav>
-        <div className="sidebar-card">
-          <div className="mini-orbit"><span /><span /><span /></div>
-          <strong>Haz crecer la red</strong>
-          <p>Invita a alguien de tu comunidad a formar parte.</p>
-          <button type="button"><UserPlus size={16} /> Invitar persona</button>
-        </div>
         <div className="sidebar-footer">
           <span className="sidebar-status"><span className={`status-dot ${live ? "status-live" : ""}`} />{live ? "Conectado" : "Demostración"}</span>
           <span className="app-version">v{APP_VERSION}</span>
@@ -774,7 +766,6 @@ function Workspace({
             <kbd>⌘ K</kbd>
           </label>
           <div className="topbar-actions">
-            <button className="icon-button" type="button" aria-label="Notificaciones"><Bell size={19} /><span /></button>
             <div className="account-summary">
               <div><strong>{firstName(displayProfile.full_name)}</strong><span>{displayProfile.cohort}</span></div>
               {accountControl}
@@ -1405,14 +1396,13 @@ function Connections({ profile, profiles, onOpen }: { profile: Profile; profiles
             <span className="living-kicker"><Sparkles size={13} /> {networkMode === "lineage" ? "TU CONSTELACIÓN" : "NUESTRA COMUNIDAD"}</span>
             <h1>{networkMode === "lineage" ? <>Tu árbol está <em>vivo.</em></> : <><em>{profiles.length} personas</em>, {cohortGroups.length} promociones.</>}</h1>
             <p>{networkMode === "lineage" ? "Arrastra para explorar · usa la rueda para acercarte · selecciona una persona para conocer su historia." : "Arrastra para recorrer los Limas · usa la rueda para acercar o alejar · las flechas muestran quién enroló a quién."}</p>
+            <div className="network-mode-switch" role="group" aria-label="Agrupar conexiones">
+              <button type="button" className={networkMode === "lineage" ? "active" : ""} onClick={() => changeMode("lineage")}><Network size={14} /> Mi linaje</button>
+              <button type="button" className={networkMode === "cohorts" ? "active" : ""} onClick={() => changeMode("cohorts")}><Users size={14} /> Por promociones <span>{cohortGroups.length}</span></button>
+            </div>
           </div>
           <div className="living-count"><strong>{networkMode === "lineage" ? network.points.length : profiles.length}</strong><span>personas en<br />{networkMode === "lineage" ? "tu linaje" : "la comunidad"}</span></div>
         </header>
-
-        <div className="network-mode-switch" role="group" aria-label="Agrupar conexiones">
-          <button type="button" className={networkMode === "lineage" ? "active" : ""} onClick={() => changeMode("lineage")}><Network size={14} /> Mi linaje</button>
-          <button type="button" className={networkMode === "cohorts" ? "active" : ""} onClick={() => changeMode("cohorts")}><Users size={14} /> Por promociones <span>{cohortGroups.length}</span></button>
-        </div>
 
         <div className="network-controls" aria-label="Controles del mapa">
           <button type="button" onClick={() => adjustZoom(0.12)} aria-label="Acercar"><Plus size={17} /></button>
