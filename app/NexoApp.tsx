@@ -58,7 +58,7 @@ import {
 
 type View = "home" | "directory" | "connections" | "profile";
 
-const APP_VERSION = "1.0.24";
+const APP_VERSION = "1.0.25";
 
 export type Profile = {
   id: string;
@@ -562,6 +562,7 @@ export default function NexoApp({ config }: { config: NexoConfig }) {
         signUpForceRedirectUrl={authRedirectUrl}
         signInFallbackRedirectUrl={authRedirectUrl}
         signUpFallbackRedirectUrl={authRedirectUrl}
+        afterSignOutUrl={authRedirectUrl}
         appearance={{
           variables: { colorPrimary: "#e36b52", colorText: "#182b3a", borderRadius: "0.65rem" },
         }}
