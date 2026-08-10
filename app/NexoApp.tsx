@@ -1065,6 +1065,28 @@ type CohortFocusTarget = {
   worldTop: number;
 };
 
+type ElementBox = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+function getElementBox(element: HTMLElement, ancestor: HTMLElement): ElementBox | null {
+  let x = 0;
+  let y = 0;
+  let current: HTMLElement | null = element;
+
+  while (current && current !== ancestor) {
+    x += current.offsetLeft;
+    y += current.offsetTop;
+    current = current.offsetParent as HTMLElement | null;
+  }
+
+  if (current !== ancestor) return null;
+  return { x, y, width: element.offsetWidth, height: element.offsetHeight };
+}
+
 function buildCohortGroups(profiles: Profile[]): CohortGroup[] {
   const colors = ["#ef745b", "#e8a65b", "#a4bb91", "#72a9a1", "#7095bd", "#9b86bd", "#c67f9f", "#db8a70"];
   const grouped = new Map<string, Profile[]>();
@@ -1113,7 +1135,6 @@ function CohortGalaxy({
     if (!stack) return;
     let frame = 0;
     const measureConnections = () => {
-      const stackBounds = stack.getBoundingClientRect();
       const edges: CohortConnectionLayout[] = [];
 
       profiles.forEach((person) => {
@@ -1123,30 +1144,32 @@ function CohortGalaxy({
         const toNode = memberRefs.current.get(person.id);
         if (!enroller || !fromNode || !toNode) return;
 
-        const from = fromNode.getBoundingClientRect();
-        const to = toNode.getBoundingClientRect();
-        const fromCenter = { x: (from.left - stackBounds.left + from.width / 2) / zoom, y: (from.top - stackBounds.top + from.height / 2) / zoom };
-        const toCenter = { x: (to.left - stackBounds.left + to.width / 2) / zoom, y: (to.top - stackBounds.top + to.height / 2) / zoom };
+        const fromAvatar = fromNode.querySelector<HTMLElement>(".avatar") ?? fromNode;
+        const toAvatar = toNode.querySelector<HTMLElement>(".avatar") ?? toNode;
+        const from = getElementBox(fromAvatar, stack);
+        const to = getElementBox(toAvatar, stack);
+        if (!from || !to) return;
+
+        const fromCenter = { x: from.x + from.width / 2, y: from.y + from.height / 2 };
+        const toCenter = { x: to.x + to.width / 2, y: to.y + to.height / 2 };
+        const deltaX = toCenter.x - fromCenter.x;
+        const deltaY = toCenter.y - fromCenter.y;
+        const distance = Math.max(1, Math.hypot(deltaX, deltaY));
+        const unitX = deltaX / distance;
+        const unitY = deltaY / distance;
+        const fromRadius = Math.min(from.width, from.height) / 2 + 3;
+        const toRadius = Math.min(to.width, to.height) / 2 + 5;
+        const start = { x: fromCenter.x + unitX * fromRadius, y: fromCenter.y + unitY * fromRadius };
+        const end = { x: toCenter.x - unitX * toRadius, y: toCenter.y - unitY * toRadius };
         const mostlyVertical = Math.abs(toCenter.y - fromCenter.y) >= 80;
         let d: string;
 
         if (mostlyVertical) {
-          const direction = toCenter.y >= fromCenter.y ? 1 : -1;
-          const x1 = fromCenter.x;
-          const y1 = fromCenter.y + direction * from.height / zoom / 2;
-          const x2 = toCenter.x;
-          const y2 = toCenter.y - direction * to.height / zoom / 2;
-          const midY = (y1 + y2) / 2;
-          d = `M ${x1.toFixed(1)} ${y1.toFixed(1)} C ${x1.toFixed(1)} ${midY.toFixed(1)}, ${x2.toFixed(1)} ${midY.toFixed(1)}, ${x2.toFixed(1)} ${y2.toFixed(1)}`;
+          const midY = (start.y + end.y) / 2;
+          d = `M ${start.x.toFixed(1)} ${start.y.toFixed(1)} C ${start.x.toFixed(1)} ${midY.toFixed(1)}, ${end.x.toFixed(1)} ${midY.toFixed(1)}, ${end.x.toFixed(1)} ${end.y.toFixed(1)}`;
         } else {
-          const direction = toCenter.x >= fromCenter.x ? 1 : -1;
-          const x1 = fromCenter.x + direction * from.width / zoom / 2;
-          const y1 = fromCenter.y;
-          const x2 = toCenter.x - direction * to.width / zoom / 2;
-          const y2 = toCenter.y;
-          const distance = x2 - x1;
-          const controlY = Math.min(y1, y2) - Math.max(28, Math.abs(distance) * 0.12);
-          d = `M ${x1.toFixed(1)} ${y1.toFixed(1)} C ${(x1 + distance * 0.28).toFixed(1)} ${controlY.toFixed(1)}, ${(x2 - distance * 0.28).toFixed(1)} ${controlY.toFixed(1)}, ${x2.toFixed(1)} ${y2.toFixed(1)}`;
+          const controlY = Math.min(start.y, end.y) - Math.max(28, Math.abs(end.x - start.x) * 0.12);
+          d = `M ${start.x.toFixed(1)} ${start.y.toFixed(1)} C ${(start.x + (end.x - start.x) * 0.28).toFixed(1)} ${controlY.toFixed(1)}, ${(end.x - (end.x - start.x) * 0.28).toFixed(1)} ${controlY.toFixed(1)}, ${end.x.toFixed(1)} ${end.y.toFixed(1)}`;
         }
 
         edges.push({
@@ -1176,7 +1199,7 @@ function CohortGalaxy({
       observer.disconnect();
       window.removeEventListener("resize", scheduleMeasurement);
     };
-  }, [profileById, profiles, zoom]);
+  }, [profileById, profiles]);
 
   const relatedProfileIds = useMemo(() => {
     const ids = new Set<string>();
