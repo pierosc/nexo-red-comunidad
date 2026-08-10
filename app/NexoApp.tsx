@@ -58,7 +58,7 @@ import {
 
 type View = "home" | "directory" | "connections" | "profile";
 
-const APP_VERSION = "1.0.21";
+const APP_VERSION = "1.0.22";
 
 export type Profile = {
   id: string;
@@ -549,12 +549,21 @@ function useProfiles(userId: string, config: NexoConfig, getToken?: () => Promis
 }
 
 export default function NexoApp({ config }: { config: NexoConfig }) {
+  const [authRedirectUrl, setAuthRedirectUrl] = useState("/");
+  useEffect(() => {
+    if (!window.location.hostname.endsWith("github.io")) return;
+    const repository = window.location.pathname.split("/").filter(Boolean)[0];
+    if (!repository) return;
+    const frame = requestAnimationFrame(() => setAuthRedirectUrl(`/${repository}/`));
+    return () => cancelAnimationFrame(frame);
+  }, []);
+
   if (config.clerkPublishableKey) {
     return (
       <ClerkProvider
         publishableKey={config.clerkPublishableKey}
-        signInFallbackRedirectUrl="/"
-        signUpFallbackRedirectUrl="/"
+        signInFallbackRedirectUrl={authRedirectUrl}
+        signUpFallbackRedirectUrl={authRedirectUrl}
         appearance={{
           variables: { colorPrimary: "#e36b52", colorText: "#182b3a", borderRadius: "0.65rem" },
         }}
