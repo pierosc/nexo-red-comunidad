@@ -15,6 +15,7 @@ createRoot(root).render(
         clerkPublishableKey: import.meta.env.VITE_CLERK_PUBLISHABLE_KEY ?? "",
         supabaseUrl: import.meta.env.VITE_SUPABASE_URL ?? "",
         supabasePublishableKey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ?? "",
+        appUrl: new URL(import.meta.env.BASE_URL, window.location.origin).toString(),
       }}
     />
   </StrictMode>,

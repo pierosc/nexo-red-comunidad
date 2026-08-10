@@ -58,7 +58,7 @@ import {
 
 type View = "home" | "directory" | "connections" | "profile";
 
-const APP_VERSION = "1.0.22";
+const APP_VERSION = "1.0.23";
 
 export type Profile = {
   id: string;
@@ -115,6 +115,7 @@ export type NexoConfig = {
   clerkPublishableKey: string;
   supabaseUrl: string;
   supabasePublishableKey: string;
+  appUrl?: string;
 };
 
 const coreDemoProfiles: Profile[] = [
@@ -549,19 +550,16 @@ function useProfiles(userId: string, config: NexoConfig, getToken?: () => Promis
 }
 
 export default function NexoApp({ config }: { config: NexoConfig }) {
-  const [authRedirectUrl, setAuthRedirectUrl] = useState("/");
-  useEffect(() => {
-    if (!window.location.hostname.endsWith("github.io")) return;
-    const repository = window.location.pathname.split("/").filter(Boolean)[0];
-    if (!repository) return;
-    const frame = requestAnimationFrame(() => setAuthRedirectUrl(`/${repository}/`));
-    return () => cancelAnimationFrame(frame);
-  }, []);
+  const authRedirectUrl = config.appUrl || "/";
 
   if (config.clerkPublishableKey) {
     return (
       <ClerkProvider
         publishableKey={config.clerkPublishableKey}
+        signInUrl={authRedirectUrl}
+        signUpUrl={authRedirectUrl}
+        signInForceRedirectUrl={authRedirectUrl}
+        signUpForceRedirectUrl={authRedirectUrl}
         signInFallbackRedirectUrl={authRedirectUrl}
         signUpFallbackRedirectUrl={authRedirectUrl}
         appearance={{
@@ -585,7 +583,11 @@ function ClerkExperience({ config }: { config: NexoConfig }) {
     return (
       <Landing
         action={
-          <SignInButton mode="modal">
+          <SignInButton
+            mode="modal"
+            forceRedirectUrl={config.appUrl || "/"}
+            fallbackRedirectUrl={config.appUrl || "/"}
+          >
             <button className="primary-button" type="button">
               Iniciar sesión <ArrowRight size={17} />
             </button>
