@@ -34,6 +34,7 @@ import {
   Pencil,
   PanelLeftClose,
   PanelLeftOpen,
+  Phone,
   Plus,
   Save,
   Search,
@@ -58,7 +59,21 @@ import {
 
 type View = "home" | "directory" | "connections" | "profile";
 
-const APP_VERSION = "1.0.25";
+const APP_VERSION = "1.0.26";
+
+const STRETCHING_OPTIONS = [
+  "Mimo",
+  "Odalisca",
+  "Novia",
+  "Puma",
+  "Bailarina",
+  "Mariposa",
+  "Cupido",
+  "Gaviota",
+  "Streapper / striper",
+  "Modelo",
+  "Azúcar",
+] as const;
 
 export type Profile = {
   id: string;
@@ -80,6 +95,9 @@ export type Profile = {
   profession: string | null;
   linkedin_url: string | null;
   instagram_url?: string | null;
+  phone?: string | null;
+  facebook_url?: string | null;
+  stretching?: string | null;
   hobbies?: string | null;
   address?: string | null;
   enrolled_by_id: string | null;
@@ -106,6 +124,9 @@ type ProfileDraft = Pick<
   | "profession"
   | "linkedin_url"
   | "instagram_url"
+  | "phone"
+  | "facebook_url"
+  | "stretching"
   | "hobbies"
   | "address"
   | "enrolled_by_id"
@@ -324,6 +345,9 @@ const emptyDraft: ProfileDraft = {
   profession: "",
   linkedin_url: "",
   instagram_url: "",
+  phone: "",
+  facebook_url: "",
+  stretching: "",
   hobbies: "",
   address: "",
   enrolled_by_id: null,
@@ -350,6 +374,14 @@ function instagramHandle(value?: string | null) {
 function normalizeInstagram(value?: string | null) {
   const handle = instagramHandle(value);
   return handle ? `https://instagram.com/${handle}` : null;
+}
+
+function normalizeFacebook(value?: string | null) {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  if (/^(www\.)?facebook\.com\//i.test(trimmed)) return `https://${trimmed}`;
+  return `https://facebook.com/${trimmed.replace(/^@/, "")}`;
 }
 
 function legacyCohortToLima(value: string) {
@@ -506,6 +538,9 @@ function useProfiles(userId: string, config: NexoConfig, getToken?: () => Promis
         profession: draft.profession || null,
         linkedin_url: draft.linkedin_url || null,
         instagram_url: normalizeInstagram(draft.instagram_url),
+        phone: draft.phone?.trim() || null,
+        facebook_url: normalizeFacebook(draft.facebook_url),
+        stretching: draft.stretching || null,
         hobbies: draft.hobbies || null,
         address: draft.address || null,
         enrolled_by_id: draft.enrolled_by_id || null,
@@ -535,6 +570,31 @@ function useProfiles(userId: string, config: NexoConfig, getToken?: () => Promis
     [client, refresh, userId],
   );
 
+  const saveConnection = useCallback(
+    async (enrollerId: string, enrolleeId: string) => {
+      if (!enrollerId || !enrolleeId || enrollerId === enrolleeId) {
+        throw new Error("La conexión seleccionada no es válida.");
+      }
+
+      if (client) {
+        const { error: connectionError } = await client.rpc("set_enrollment_connection", {
+          p_enroller_id: enrollerId,
+          p_enrollee_id: enrolleeId,
+        });
+        if (connectionError) throw connectionError;
+        await refresh();
+        return;
+      }
+
+      setProfiles((previous) => previous.map((candidate) => (
+        candidate.id === enrolleeId
+          ? { ...candidate, enrolled_by_id: enrollerId, updated_at: new Date().toISOString() }
+          : candidate
+      )));
+    },
+    [client, refresh],
+  );
+
   const deleteProfile = useCallback(async () => {
     if (client) {
       const { error: deleteError } = await client
@@ -546,7 +606,7 @@ function useProfiles(userId: string, config: NexoConfig, getToken?: () => Promis
     setProfiles((previous) => previous.filter((profile) => profile.clerk_user_id !== userId));
   }, [client, userId]);
 
-  return { profiles, loading, error, live, saveProfile, deleteProfile };
+  return { profiles, loading, error, live, saveProfile, saveConnection, deleteProfile };
 }
 
 export default function NexoApp({ config }: { config: NexoConfig }) {
@@ -736,12 +796,13 @@ function Workspace({
   accountControl: React.ReactNode;
   onDeleteAccount?: () => Promise<void>;
 }) {
-  const { profiles, loading, error, live, saveProfile, deleteProfile } = useProfiles(userId, config, getToken);
+  const { profiles, loading, error, live, saveProfile, saveConnection, deleteProfile } = useProfiles(userId, config, getToken);
   const [view, setView] = useState<View>("home");
   const [query, setQuery] = useState("");
   const [cohort, setCohort] = useState("Todas");
   const [selected, setSelected] = useState<Profile | null>(null);
   const [editing, setEditing] = useState(false);
+  const [addingConnection, setAddingConnection] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -780,6 +841,9 @@ function Workspace({
     profession: null,
     linkedin_url: null,
     instagram_url: null,
+    phone: null,
+    facebook_url: null,
+    stretching: null,
     hobbies: null,
     address: null,
     enrolled_by_id: null,
@@ -890,7 +954,7 @@ function Workspace({
           {view === "directory" && (
             <Directory profiles={filtered} cohorts={cohorts} cohort={cohort} query={query} onQuery={setQuery} onCohort={setCohort} onOpen={setSelected} />
           )}
-          {view === "connections" && <Connections profile={displayProfile} profiles={profiles} onOpen={setSelected} />}
+          {view === "connections" && <Connections profile={displayProfile} profiles={profiles} onOpen={setSelected} onAdd={() => setAddingConnection(true)} />}
           {view === "profile" && (
             <MyProfile profile={displayProfile} profiles={profiles} onEdit={() => setEditing(true)} onOpen={setSelected} onDeleteRequest={onDeleteAccount ? () => setDeletingAccount(true) : undefined} />
           )}
@@ -913,6 +977,17 @@ function Workspace({
           profiles={profiles}
           onClose={() => setEditing(false)}
           onSave={async (draft) => { await saveProfile(draft, currentProfile); setEditing(false); }}
+        />
+      )}
+      {addingConnection && (
+        <ConnectionEditor
+          profile={displayProfile}
+          profiles={profiles}
+          onClose={() => setAddingConnection(false)}
+          onSave={async (enrollerId, enrolleeId) => {
+            await saveConnection(enrollerId, enrolleeId);
+            setAddingConnection(false);
+          }}
         />
       )}
       {deletingAccount && <AccountDeletionDialog onClose={() => setDeletingAccount(false)} onConfirm={removeAccount} />}
@@ -1425,7 +1500,7 @@ function CohortGalaxy({
   );
 }
 
-function Connections({ profile, profiles, onOpen }: { profile: Profile; profiles: Profile[]; onOpen: (profile: Profile) => void }) {
+function Connections({ profile, profiles, onOpen, onAdd }: { profile: Profile; profiles: Profile[]; onOpen: (profile: Profile) => void; onAdd: () => void }) {
   const network = useMemo(() => buildLivingNetwork(profile, profiles), [profile, profiles]);
   const cohortGroups = useMemo(() => buildCohortGroups(profiles), [profiles]);
   const [networkMode, setNetworkMode] = useState<"lineage" | "cohorts">("cohorts");
@@ -1455,7 +1530,7 @@ function Connections({ profile, profiles, onOpen }: { profile: Profile; profiles
     });
   }, [zoom]);
   const handlePointerDown = (event: ReactPointerEvent<HTMLElement>) => {
-    if ((event.target as HTMLElement).closest(".living-node, .cohort-stack-member, .cohort-stack-center, .cohort-search, .network-controls, .network-story-card, .network-mode-switch")) return;
+    if ((event.target as HTMLElement).closest(".living-node, .cohort-stack-member, .cohort-stack-center, .cohort-search, .network-controls, .network-story-card, .network-mode-switch, .add-connection-button")) return;
     dragRef.current = { x: event.clientX, y: event.clientY, panX: pan.x, panY: pan.y };
     setDragging(true);
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -1503,6 +1578,7 @@ function Connections({ profile, profiles, onOpen }: { profile: Profile; profiles
               <button type="button" className={networkMode === "lineage" ? "active" : ""} onClick={() => changeMode("lineage")}><Network size={14} /> Mi linaje</button>
               <button type="button" className={networkMode === "cohorts" ? "active" : ""} onClick={() => changeMode("cohorts")}><Users size={14} /> Por promociones <span>{cohortGroups.length}</span></button>
             </div>
+            <button className="add-connection-button" type="button" onClick={onAdd}><Plus size={16} /> Agregar conexión</button>
           </div>
           <div className="living-count"><strong>{networkMode === "lineage" ? network.points.length : profiles.length}</strong><span>personas en<br />{networkMode === "lineage" ? "tu linaje" : "la comunidad"}</span></div>
         </header>
@@ -1568,7 +1644,7 @@ function MyProfile({ profile, profiles, onEdit, onOpen, onDeleteRequest }: { pro
         <div className="identity"><span className="cohort-pill">{profile.cohort}</span><h1>{profile.full_name}</h1><p>{profile.profession}</p><div><span><MapPin size={15} /> {profile.city}, {profile.country}</span><span><CalendarDays size={15} /> {formatBirthDate(profile.birth_date)}</span></div></div>
       </div>
       <div className="profile-content-grid">
-        <section className="section-card profile-about"><span className="section-label">SOBRE MÍ</span><h2>Mi historia</h2><p>{profile.bio || "Aún no has agregado una descripción."}</p><div className="profile-detail-list">{profile.hobbies && <span><Heart size={15} /> {profile.hobbies}</span>}{profile.address && <span><MapPin size={15} /> {profile.address}</span>}</div><div className="profile-social-links">{profile.linkedin_url && <a href={profile.linkedin_url} target="_blank" rel="noreferrer"><Link2 size={16} /> Perfil profesional <ArrowUpRight size={15} /></a>}{profile.instagram_url && <a href={profile.instagram_url} target="_blank" rel="noreferrer"><AtSign size={16} /> Instagram <ArrowUpRight size={15} /></a>}</div></section>
+        <section className="section-card profile-about"><span className="section-label">SOBRE MÍ</span><h2>Mi historia</h2><p>{profile.bio || "Aún no has agregado una descripción."}</p><div className="profile-detail-list">{profile.hobbies && <span><Heart size={15} /> {profile.hobbies}</span>}{profile.address && <span><MapPin size={15} /> {profile.address}</span>}{profile.stretching && <span><Sparkles size={15} /> Estiramiento: {profile.stretching}</span>}</div><div className="profile-social-links">{profile.phone && <a href={`tel:${profile.phone}`}><Phone size={16} /> {profile.phone}</a>}{profile.facebook_url && <a href={profile.facebook_url} target="_blank" rel="noreferrer"><Link2 size={16} /> Facebook <ArrowUpRight size={15} /></a>}{profile.linkedin_url && <a href={profile.linkedin_url} target="_blank" rel="noreferrer"><Link2 size={16} /> Perfil profesional <ArrowUpRight size={15} /></a>}{profile.instagram_url && <a href={profile.instagram_url} target="_blank" rel="noreferrer"><AtSign size={16} /> Instagram <ArrowUpRight size={15} /></a>}</div></section>
         <section className="section-card profile-links"><span className="section-label">CONEXIONES</span><h2>Mi nexo</h2>{mentor && <ConnectionListItem label="Me enroló" profile={mentor} onClick={() => onOpen(mentor)} />}{enrolled.map((person) => <ConnectionListItem key={person.id} label="Enrolado por mí" profile={person} onClick={() => onOpen(person)} />)}</section>
       </div>
       {onDeleteRequest && <section className="account-danger-zone"><div><span className="section-label">CUENTA</span><h2>Eliminar mi cuenta</h2><p>Esta acción elimina permanentemente tu perfil, tus datos públicos y tu acceso a Nexo.</p></div><button type="button" onClick={onDeleteRequest}><Trash2 size={17} /> Eliminar cuenta</button></section>}
@@ -1626,7 +1702,9 @@ function ProfilePanel({ profile, profiles, isOwn, onClose, onOpen, onEdit }: { p
           <h2>{profile.full_name}</h2>
           <p className="panel-role">{profile.profession ?? "Miembro de la comunidad"}</p>
           <div className="panel-meta">{profile.city && <span><MapPin /> {profile.city}, {profile.country}</span>}<span><CalendarDays /> {formatBirthDate(profile.birth_date)}</span></div>
-          <div className="panel-about"><span className="section-label">SU HISTORIA</span><p>{profile.bio || "Esta persona todavía no ha compartido su descripción."}</p><div className="profile-detail-list">{profile.hobbies && <span><Heart size={15} /> {profile.hobbies}</span>}{profile.address && <span><MapPin size={15} /> {profile.address}</span>}</div></div>
+          <div className="panel-about"><span className="section-label">SU HISTORIA</span><p>{profile.bio || "Esta persona todavía no ha compartido su descripción."}</p><div className="profile-detail-list">{profile.hobbies && <span><Heart size={15} /> {profile.hobbies}</span>}{profile.address && <span><MapPin size={15} /> {profile.address}</span>}{profile.stretching && <span><Sparkles size={15} /> Estiramiento: {profile.stretching}</span>}</div></div>
+          {profile.phone && <a className="panel-link" href={`tel:${profile.phone}`}><Phone size={16} /> {profile.phone}</a>}
+          {profile.facebook_url && <a className="panel-link" href={profile.facebook_url} target="_blank" rel="noreferrer"><Link2 size={16} /> Ver Facebook <ArrowUpRight size={15} /></a>}
           {profile.linkedin_url && <a className="panel-link" href={profile.linkedin_url} target="_blank" rel="noreferrer"><Link2 size={16} /> Ver perfil profesional <ArrowUpRight size={15} /></a>}
           {profile.instagram_url && <a className="panel-link" href={profile.instagram_url} target="_blank" rel="noreferrer"><AtSign size={16} /> Ver Instagram <ArrowUpRight size={15} /></a>}
           <div className="panel-connections"><div className="section-heading"><div><span className="section-label">CONEXIONES</span><h3>Su nexo</h3></div><Network size={20} /></div>{mentor && <ConnectionListItem label="Le enroló" profile={mentor} onClick={() => onOpen(mentor)} />}{enrolled.map((person) => <ConnectionListItem key={person.id} label="Enrolado por esta persona" profile={person} onClick={() => onOpen(person)} />)}{!mentor && !enrolled.length && <p className="muted-copy">Todavía no tiene conexiones registradas.</p>}</div>
@@ -1652,6 +1730,15 @@ function CohortInput({ value, onChange }: { value: string; onChange: (value: str
 
 function InstagramInput({ value, onChange }: { value?: string | null; onChange: (value: string) => void }) {
   return <div className="instagram-handle-input"><span>@</span><input value={instagramHandle(value)} onChange={(event) => onChange(instagramHandle(event.target.value))} placeholder="tu_usuario" inputMode="text" pattern="[A-Za-z0-9._]{1,30}" title="Usa únicamente letras, números, puntos o guiones bajos." /></div>;
+}
+
+function StretchingSelect({ value, onChange }: { value?: string | null; onChange: (value: string) => void }) {
+  return (
+    <select value={value ?? ""} onChange={(event) => onChange(event.target.value)}>
+      <option value="">Vacío</option>
+      {STRETCHING_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
+    </select>
+  );
 }
 
 function ProfilePhotoEditor({ profile, draft, update }: { profile: Profile; draft: ProfileDraft; update: DraftUpdater }) {
@@ -1843,6 +1930,89 @@ function ProfilePicker({
   );
 }
 
+function ConnectionEditor({
+  profile,
+  profiles,
+  onClose,
+  onSave,
+}: {
+  profile: Profile;
+  profiles: Profile[];
+  onClose: () => void;
+  onSave: (enrollerId: string, enrolleeId: string) => Promise<void>;
+}) {
+  const [direction, setDirection] = useState<"i_enrolled" | "enrolled_me">("i_enrolled");
+  const [personId, setPersonId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const selectedPerson = profiles.find((person) => person.id === personId);
+  const previousEnroller = direction === "i_enrolled"
+    ? profiles.find((person) => person.id === selectedPerson?.enrolled_by_id)
+    : profiles.find((person) => person.id === profile.enrolled_by_id);
+
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !saving) onClose();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose, saving]);
+
+  const chooseDirection = (next: "i_enrolled" | "enrolled_me") => {
+    setDirection(next);
+    setPersonId(next === "enrolled_me" ? profile.enrolled_by_id : null);
+    setMessage(null);
+  };
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!personId) {
+      setMessage("Selecciona a la persona que forma parte de esta conexión.");
+      return;
+    }
+    setSaving(true);
+    setMessage(null);
+    const enrollerId = direction === "i_enrolled" ? profile.id : personId;
+    const enrolleeId = direction === "i_enrolled" ? personId : profile.id;
+    try {
+      await onSave(enrollerId, enrolleeId);
+    } catch {
+      setMessage("No pudimos guardar la conexión. Inténtalo nuevamente.");
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="overlay editor-overlay connection-editor-overlay" role="presentation">
+      <section className="profile-editor connection-editor" role="dialog" aria-modal="true" aria-labelledby="connection-editor-title">
+        <header>
+          <div><span className="section-label">TU RED</span><h2 id="connection-editor-title">Agregar una conexión</h2><p>Registra cómo se creó este vínculo de enrolamiento.</p></div>
+          <button className="close-button" type="button" onClick={onClose} aria-label="Cerrar modal"><X /></button>
+        </header>
+        <form onSubmit={submit}>
+          <div className="connection-direction" role="radiogroup" aria-label="Tipo de conexión">
+            <button type="button" role="radio" aria-checked={direction === "i_enrolled"} className={direction === "i_enrolled" ? "active" : ""} onClick={() => chooseDirection("i_enrolled")}>
+              <span><ArrowRight size={18} /></span><strong>Yo enrolé a alguien</strong><small>La persona quedará conectada directamente debajo de ti.</small>
+            </button>
+            <button type="button" role="radio" aria-checked={direction === "enrolled_me"} className={direction === "enrolled_me" ? "active" : ""} onClick={() => chooseDirection("enrolled_me")}>
+              <span><ArrowRight size={18} /></span><strong>Alguien me enroló</strong><small>La persona seleccionada aparecerá como quien te sumó a la red.</small>
+            </button>
+          </div>
+          <div className="field connection-person-picker">
+            <span>{direction === "i_enrolled" ? "¿A quién enrolaste?" : "¿Quién te enroló?"}</span>
+            <ProfilePicker profiles={profiles} profileId={profile.id} value={personId} onChange={setPersonId} />
+          </div>
+          {previousEnroller && personId && previousEnroller.id !== (direction === "i_enrolled" ? profile.id : personId) && (
+            <p className="connection-replacement-note"><AlertTriangle size={15} /> Esta acción reemplazará la conexión actual con {previousEnroller.full_name}.</p>
+          )}
+          {message && <p className="form-message">{message}</p>}
+          <footer><button className="ghost-button" type="button" onClick={onClose}>Cancelar</button><button className="primary-button" type="submit" disabled={saving || !personId}><Network size={17} /> {saving ? "Guardando..." : "Guardar conexión"}</button></footer>
+        </form>
+      </section>
+    </div>
+  );
+}
+
 function ProfileOnboarding({
   profile,
   profiles,
@@ -1919,6 +2089,9 @@ function ProfileOnboarding({
 
             {step === 3 && <div className="onboarding-step-panel step-enter"><div className="form-grid onboarding-fields">
               <div className="field field-wide"><span>¿Quién te enroló?</span><ProfilePicker profiles={profiles} profileId={profile.id} value={draft.enrolled_by_id} onChange={(value) => update("enrolled_by_id", value)} /></div>
+              <Field label="Número de teléfono"><input type="tel" inputMode="tel" value={draft.phone ?? ""} onChange={(event) => update("phone", event.target.value)} placeholder="+51 999 999 999" /></Field>
+              <Field label="Facebook"><input value={draft.facebook_url ?? ""} onChange={(event) => update("facebook_url", event.target.value)} placeholder="facebook.com/tu.perfil" /></Field>
+              <Field label="Estiramiento"><StretchingSelect value={draft.stretching} onChange={(value) => update("stretching", value)} /></Field>
               <Field label="LinkedIn o portafolio"><input type="url" value={draft.linkedin_url ?? ""} onChange={(event) => update("linkedin_url", event.target.value)} placeholder="https://linkedin.com/in/…" /></Field>
               <Field label="Instagram"><InstagramInput value={draft.instagram_url} onChange={(value) => update("instagram_url", value)} /></Field>
             </div><div className="onboarding-ready"><Sparkles size={21} /><div><strong>Tu perfil está listo para nacer.</strong><p>Al guardarlo podrás explorar el directorio, abrir perfiles y visualizar todas tus conexiones.</p></div></div></div>}
@@ -1964,6 +2137,9 @@ function ProfileEditor({ profile, profiles, onClose, onSave }: { profile: Profil
             <Field label="Dirección o zona"><input value={draft.address ?? ""} onChange={(event) => update("address", event.target.value)} placeholder="Miraflores, Lima" /></Field>
             <Field label="Hobbies e intereses"><input value={draft.hobbies ?? ""} onChange={(event) => update("hobbies", event.target.value)} placeholder="Fotografía, running, lectura…" /></Field>
             <div className="field field-wide"><span>¿Quién te enroló?</span><ProfilePicker profiles={profiles} profileId={profile.id} value={draft.enrolled_by_id} onChange={(value) => update("enrolled_by_id", value)} /></div>
+            <Field label="Número de teléfono"><input type="tel" inputMode="tel" value={draft.phone ?? ""} onChange={(event) => update("phone", event.target.value)} placeholder="+51 999 999 999" /></Field>
+            <Field label="Facebook"><input value={draft.facebook_url ?? ""} onChange={(event) => update("facebook_url", event.target.value)} placeholder="facebook.com/tu.perfil" /></Field>
+            <Field label="Estiramiento"><StretchingSelect value={draft.stretching} onChange={(value) => update("stretching", value)} /></Field>
             <Field label="LinkedIn o portafolio"><input type="url" value={draft.linkedin_url ?? ""} onChange={(event) => update("linkedin_url", event.target.value)} placeholder="https://linkedin.com/in/..." /></Field>
             <Field label="Instagram"><InstagramInput value={draft.instagram_url} onChange={(value) => update("instagram_url", value)} /></Field>
             <Field label="Tu descripción" wide><textarea rows={4} maxLength={320} value={draft.bio ?? ""} onChange={(event) => update("bio", event.target.value)} placeholder="Cuéntanos brevemente quién eres, qué haces y qué te inspira." /><small>{draft.bio?.length ?? 0}/320</small></Field>
