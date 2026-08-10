@@ -56,7 +56,7 @@ import {
 
 type View = "home" | "directory" | "connections" | "profile";
 
-const APP_VERSION = "1.0.19";
+const APP_VERSION = "1.0.20";
 
 export type Profile = {
   id: string;

@@ -242,6 +242,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .theme-dark .map-caption { background:#1b303a; }.theme-dark .error-banner { background:#402722; border-color:#6b3b31; color:#ffb9a8; }
 .theme-dark .cover-preview-action,.theme-dark .image-frame-window-cover { background:#0e202b; }
 .theme-dark .cohort-stack-center { background:rgba(245,241,233,.98); }.theme-dark .cohort-stack-center strong { color:#18303e; }.theme-dark .cohort-stack-center small { color:#586a72; }
+.theme-dark .network-mode-switch { background:rgba(255,255,255,.06); border-color:rgba(255,255,255,.16); }.theme-dark .network-mode-switch button { color:#9cafb7; }.theme-dark .network-mode-switch button:hover { color:#fff; }.theme-dark .network-mode-switch button.active { background:#f2eee6; color:#18303e; }
 .workspace,.topbar,.section-card,.stat-card,.profile-card,.profile-main-card,.profile-panel,.profile-editor { transition:background-color .25s ease,border-color .25s ease,color .25s ease; }
 
 @media (max-width: 1100px) {
