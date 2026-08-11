@@ -890,7 +890,7 @@ function ValEasterEgg() {
         </div>
         <div className="val-message">
           <span className="val-kicker"><Sparkles size={14} /> Encontraste un pedacito secreto</span>
-          <h2 id="val-easter-egg-title">Este software lo creé yo, <em>Val</em>, con cariño.</h2>
+          <h2 id="val-easter-egg-title">Hecho con cariño para acompañarte en tu camino. <em>— Val</em></h2>
           <p>Cada conexión, detalle y color fue pensado para acercarnos un poquito más.</p>
           <span className="val-signature">Hecho con <Heart size={15} fill="currentColor" /> para esta comunidad</span>
         </div>
