@@ -647,11 +647,12 @@ function ClerkExperience({ config }: { config: NexoConfig }) {
           <SignInButton
             mode="modal"
             oauthFlow="popup"
+            withSignUp
             forceRedirectUrl={config.appUrl || "/"}
             fallbackRedirectUrl={config.appUrl || "/"}
           >
             <button className="primary-button" type="button">
-              Iniciar sesión <ArrowRight size={17} />
+              Entrar o crear cuenta <ArrowRight size={17} />
             </button>
           </SignInButton>
         }
