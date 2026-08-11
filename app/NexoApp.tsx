@@ -60,7 +60,7 @@ import {
 
 type View = "home" | "directory" | "connections" | "profile";
 
-const APP_VERSION = "1.0.27";
+const APP_VERSION = "1.0.28";
 
 const STRETCHING_OPTIONS = [
   "Mimo",
@@ -71,7 +71,7 @@ const STRETCHING_OPTIONS = [
   "Mariposa",
   "Cupido",
   "Gaviota",
-  "Streapper / striper",
+  "Stripper",
   "Modelo",
   "Azúcar",
 ] as const;
