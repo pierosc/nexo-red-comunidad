@@ -312,6 +312,10 @@ function createSupabase(config: NexoConfig, getToken: () => Promise<string | nul
   });
 }
 
+function isExampleProfile(profile: Profile) {
+  return profile.clerk_user_id.startsWith("demo_");
+}
+
 function useProfiles(userId: string, config: NexoConfig, getToken?: () => Promise<string | null>) {
   const live = Boolean(config.supabaseUrl && config.supabasePublishableKey && getToken);
   const [profiles, setProfiles] = useState<Profile[]>([]);
@@ -332,7 +336,7 @@ function useProfiles(userId: string, config: NexoConfig, getToken?: () => Promis
     if (queryError) {
       setError("No pudimos cargar el directorio. Revisa la conexión con Supabase.");
     } else if (data) {
-      setProfiles(data as Profile[]);
+      setProfiles((data as Profile[]).filter((profile) => !isExampleProfile(profile)));
       setError(null);
     }
     setLoading(false);
@@ -915,6 +919,19 @@ function Dashboard({ profile, profiles, loading, onOpen, onDirectory, onConnecti
   const enrolled = profiles.filter((candidate) => candidate.enrolled_by_id === profile.id);
   const mentor = profiles.find((candidate) => candidate.id === profile.enrolled_by_id);
   const recent = profiles.filter((candidate) => candidate.id !== profile.id).slice(0, 4);
+  const now = new Date();
+  const profilesThisMonth = profiles.filter((candidate) => {
+    const createdAt = new Date(candidate.created_at);
+    return createdAt.getUTCFullYear() === now.getUTCFullYear() && createdAt.getUTCMonth() === now.getUTCMonth();
+  }).length;
+  const cohortNumbers = profiles
+    .map((candidate) => Number(candidate.cohort.match(/(\d+)\s*$/)?.[1]))
+    .filter(Number.isFinite);
+  const cohortRange = cohortNumbers.length
+    ? Math.min(...cohortNumbers) === Math.max(...cohortNumbers)
+      ? `Lima ${Math.min(...cohortNumbers)}`
+      : `Lima ${Math.min(...cohortNumbers)} — Lima ${Math.max(...cohortNumbers)}`
+    : "Sin promociones";
 
   return (
     <div className="dashboard page-enter">
@@ -924,9 +941,9 @@ function Dashboard({ profile, profiles, loading, onOpen, onDirectory, onConnecti
       </div>
 
       <section className="stats-grid">
-        <article className="stat-card stat-primary"><div className="stat-icon"><Users /></div><span>Personas en la red</span><strong>{loading ? "—" : profiles.length}</strong><small><b>+8</b> este mes</small><div className="stat-decoration">N</div></article>
+        <article className="stat-card stat-primary"><div className="stat-icon"><Users /></div><span>Personas en la red</span><strong>{loading ? "—" : profiles.length}</strong><small><b>+{profilesThisMonth}</b> este mes</small><div className="stat-decoration">N</div></article>
         <article className="stat-card"><div className="stat-icon coral"><Network /></div><span>Tus conexiones</span><strong>{enrolled.length + (mentor ? 1 : 0)}</strong><small>{enrolled.length} enroladas por ti</small></article>
-        <article className="stat-card"><div className="stat-icon sage"><BookOpen /></div><span>Promociones</span><strong>{new Set(profiles.map((item) => item.cohort)).size}</strong><small>2015 — 2022</small></article>
+        <article className="stat-card"><div className="stat-icon sage"><BookOpen /></div><span>Promociones</span><strong>{new Set(profiles.map((item) => item.cohort)).size}</strong><small>{cohortRange}</small></article>
       </section>
 
       <section className="dashboard-grid">
