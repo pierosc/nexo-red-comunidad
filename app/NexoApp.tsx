@@ -1441,9 +1441,11 @@ function Connections({ profile, profiles, onOpen, onAdd }: { profile: Profile; p
   const centerCohort = useCallback((target: CohortFocusTarget) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    const compactCohortView = window.matchMedia("(max-width: 820px)").matches;
+    const focusY = compactCohortView ? Math.min(220, canvas.clientHeight * 0.28) : canvas.clientHeight / 2;
     setPan({
       x: -zoom * (target.x - target.width / 2),
-      y: canvas.clientHeight / 2 - target.worldTop - zoom * target.y,
+      y: focusY - target.worldTop - zoom * target.y,
     });
   }, [zoom]);
   const handlePointerDown = (event: ReactPointerEvent<HTMLElement>) => {
