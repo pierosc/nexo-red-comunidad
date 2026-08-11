@@ -891,7 +891,7 @@ function ValEasterEgg() {
           <span className="val-orbit val-orbit-two" aria-hidden="true"><Sparkles /></span>
           {/* This is Val's illustration, supplied for the hidden creator credit. */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/val-easter-egg.jpeg" alt="Ilustración de Val haciendo el gesto de aprobación" />
+          <img src="./val-easter-egg.jpeg" alt="Ilustración de Val haciendo el gesto de aprobación" />
         </div>
         <div className="val-message">
           <span className="val-kicker"><Sparkles size={14} /> Encontraste un pedacito secreto</span>
