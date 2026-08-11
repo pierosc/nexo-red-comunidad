@@ -3,6 +3,7 @@
 import {
   ClerkProvider,
   SignInButton,
+  SignUpButton,
   UserButton,
   useAuth,
   useUser,
@@ -59,7 +60,7 @@ import {
 
 type View = "home" | "directory" | "connections" | "profile";
 
-const APP_VERSION = "1.0.26";
+const APP_VERSION = "1.0.27";
 
 const STRETCHING_OPTIONS = [
   "Mimo",
@@ -616,8 +617,6 @@ export default function NexoApp({ config }: { config: NexoConfig }) {
     return (
       <ClerkProvider
         publishableKey={config.clerkPublishableKey}
-        signInUrl={authRedirectUrl}
-        signUpUrl={authRedirectUrl}
         signInForceRedirectUrl={authRedirectUrl}
         signUpForceRedirectUrl={authRedirectUrl}
         signInFallbackRedirectUrl={authRedirectUrl}
@@ -644,17 +643,7 @@ function ClerkExperience({ config }: { config: NexoConfig }) {
     return (
       <Landing
         action={
-          <SignInButton
-            mode="modal"
-            oauthFlow="popup"
-            withSignUp
-            forceRedirectUrl={config.appUrl || "/"}
-            fallbackRedirectUrl={config.appUrl || "/"}
-          >
-            <button className="primary-button" type="button">
-              Entrar o crear cuenta <ArrowRight size={17} />
-            </button>
-          </SignInButton>
+          <AuthActions appUrl={config.appUrl || "/"} />
         }
       />
     );
@@ -673,6 +662,33 @@ function ClerkExperience({ config }: { config: NexoConfig }) {
         await user.delete();
       }}
     />
+  );
+}
+
+function AuthActions({ appUrl }: { appUrl: string }) {
+  return (
+    <div className="auth-actions">
+      <SignUpButton
+        mode="modal"
+        oauthFlow="popup"
+        forceRedirectUrl={appUrl}
+        fallbackRedirectUrl={appUrl}
+      >
+        <button className="primary-button" type="button">
+          Crear cuenta <ArrowRight size={17} />
+        </button>
+      </SignUpButton>
+      <SignInButton
+        mode="modal"
+        oauthFlow="popup"
+        forceRedirectUrl={appUrl}
+        fallbackRedirectUrl={appUrl}
+      >
+        <button className="secondary-button" type="button">
+          Iniciar sesión
+        </button>
+      </SignInButton>
+    </div>
   );
 }
 
