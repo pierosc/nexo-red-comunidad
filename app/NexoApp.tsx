@@ -830,7 +830,6 @@ function ValEasterEggAccess() {
     <>
       <button className="val-mini-button" type="button" onClick={revealValEasterEgg} aria-label="Abrir mensaje secreto de Val" title="Un detalle de Val">
         <Heart size={14} fill="currentColor" />
-        <span>por Val</span>
       </button>
       <ValEasterEgg />
     </>
