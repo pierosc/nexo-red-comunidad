@@ -61,6 +61,20 @@ import {
 type View = "home" | "directory" | "connections" | "profile";
 
 const APP_VERSION = "1.0.28";
+const EASTER_EGG_EVENT = "nexo:val-easter-egg";
+
+const valParticles = Array.from({ length: 18 }, (_, index) => ({
+  id: index,
+  left: `${6 + ((index * 23) % 88)}%`,
+  delay: `${(index % 6) * 0.22}s`,
+  duration: `${2.8 + (index % 5) * 0.34}s`,
+  drift: `${-34 + ((index * 19) % 68)}px`,
+  size: `${10 + (index % 4) * 4}px`,
+}));
+
+function revealValEasterEgg() {
+  window.dispatchEvent(new Event(EASTER_EGG_EVENT));
+}
 
 const STRETCHING_OPTIONS = [
   "Mimo",
@@ -139,194 +153,6 @@ export type NexoConfig = {
   supabasePublishableKey: string;
   appUrl?: string;
 };
-
-const coreDemoProfiles: Profile[] = [
-  {
-    id: "a1",
-    clerk_user_id: "demo_piero",
-    full_name: "Piero Gutiérrez",
-    photo_url: "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&w=400&q=85",
-    bio: "Construyo productos digitales con propósito y conecto personas que quieren hacer una diferencia.",
-    cohort: "Promoción 2018",
-    birth_date: "1997-04-12",
-    city: "Lima",
-    country: "Perú",
-    profession: "Product Designer",
-    linkedin_url: "https://www.linkedin.com",
-    enrolled_by_id: "a2",
-    created_at: "2026-07-01T00:00:00Z",
-    updated_at: "2026-08-07T00:00:00Z",
-  },
-  {
-    id: "a2",
-    clerk_user_id: "demo_valeria",
-    full_name: "Valeria Mendoza",
-    photo_url: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=400&q=85",
-    bio: "Mentora, estratega y eterna aprendiz. Creo en las comunidades que se cuidan y crecen juntas.",
-    cohort: "Promoción 2016",
-    birth_date: "1995-09-21",
-    city: "Arequipa",
-    country: "Perú",
-    profession: "Estratega de marca",
-    linkedin_url: "https://www.linkedin.com",
-    enrolled_by_id: null,
-    created_at: "2026-05-12T00:00:00Z",
-    updated_at: "2026-08-08T00:00:00Z",
-  },
-  {
-    id: "a3",
-    clerk_user_id: "demo_mateo",
-    full_name: "Mateo Salazar",
-    photo_url: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=400&q=85",
-    bio: "Emprendedor social enfocado en educación, tecnología y oportunidades para jóvenes.",
-    cohort: "Promoción 2019",
-    birth_date: "1998-02-03",
-    city: "Cusco",
-    country: "Perú",
-    profession: "Fundador de EdTech",
-    linkedin_url: null,
-    enrolled_by_id: "a1",
-    created_at: "2026-07-19T00:00:00Z",
-    updated_at: "2026-08-06T00:00:00Z",
-  },
-  {
-    id: "a4",
-    clerk_user_id: "demo_ines",
-    full_name: "Inés Rojas",
-    photo_url: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=85",
-    bio: "Arquitecta y urbanista. Trabajo para que nuestras ciudades se sientan más humanas.",
-    cohort: "Promoción 2018",
-    birth_date: "1997-12-19",
-    city: "Lima",
-    country: "Perú",
-    profession: "Arquitecta",
-    linkedin_url: "https://www.linkedin.com",
-    enrolled_by_id: "a1",
-    created_at: "2026-06-22T00:00:00Z",
-    updated_at: "2026-08-04T00:00:00Z",
-  },
-  {
-    id: "a5",
-    clerk_user_id: "demo_lucia",
-    full_name: "Lucía Barrenechea",
-    photo_url: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=400&q=85",
-    bio: "Médica e investigadora. Me mueve traducir la ciencia en decisiones que mejoran vidas.",
-    cohort: "Promoción 2015",
-    birth_date: "1994-06-08",
-    city: "Trujillo",
-    country: "Perú",
-    profession: "Investigadora clínica",
-    linkedin_url: null,
-    enrolled_by_id: "a2",
-    created_at: "2026-05-28T00:00:00Z",
-    updated_at: "2026-08-03T00:00:00Z",
-  },
-  {
-    id: "a6",
-    clerk_user_id: "demo_tomas",
-    full_name: "Tomás Vega",
-    photo_url: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=400&q=85",
-    bio: "Ingeniero de software, músico de fin de semana y mentor de nuevos talentos.",
-    cohort: "Promoción 2020",
-    birth_date: "1999-11-14",
-    city: "Medellín",
-    country: "Colombia",
-    profession: "Software Engineer",
-    linkedin_url: "https://www.linkedin.com",
-    enrolled_by_id: "a3",
-    created_at: "2026-08-01T00:00:00Z",
-    updated_at: "2026-08-08T00:00:00Z",
-  },
-  {
-    id: "a7",
-    clerk_user_id: "demo_camila",
-    full_name: "Camila Núñez",
-    photo_url: "https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=400&q=85",
-    bio: "Abogada de impacto y facilitadora. Las mejores ideas empiezan con una buena conversación.",
-    cohort: "Promoción 2017",
-    birth_date: "1996-01-25",
-    city: "Quito",
-    country: "Ecuador",
-    profession: "Abogada",
-    linkedin_url: null,
-    enrolled_by_id: "a2",
-    created_at: "2026-06-10T00:00:00Z",
-    updated_at: "2026-08-02T00:00:00Z",
-  },
-  {
-    id: "a8",
-    clerk_user_id: "demo_sebastian",
-    full_name: "Sebastián León",
-    photo_url: null,
-    bio: "Economista interesado en finanzas inclusivas, aprendizaje continuo y proyectos con impacto regional.",
-    cohort: "Promoción 2021",
-    birth_date: "2000-05-30",
-    city: "Lima",
-    country: "Perú",
-    profession: "Analista de inversiones",
-    linkedin_url: "https://www.linkedin.com",
-    enrolled_by_id: "a4",
-    created_at: "2026-08-05T00:00:00Z",
-    updated_at: "2026-08-07T00:00:00Z",
-  },
-];
-
-const demoExpansionSeeds = [
-  ["Renata Torres", "Promoción 2015", "Consultora de innovación", "Lima", "Perú"],
-  ["Diego Paredes", "Promoción 2015", "Director creativo", "Bogotá", "Colombia"],
-  ["Mariana Costa", "Promoción 2015", "Emprendedora social", "Santiago", "Chile"],
-  ["Felipe Andrade", "Promoción 2015", "Ingeniero civil", "Quito", "Ecuador"],
-  ["Alejandra Vidal", "Promoción 2016", "Psicóloga organizacional", "Lima", "Perú"],
-  ["Nicolás Cárdenas", "Promoción 2016", "Product Manager", "Medellín", "Colombia"],
-  ["Sofía Delgado", "Promoción 2016", "Periodista", "Buenos Aires", "Argentina"],
-  ["Joaquín Reyes", "Promoción 2016", "Arquitecto", "Arequipa", "Perú"],
-  ["Daniela Cabrera", "Promoción 2017", "Diseñadora de servicios", "Lima", "Perú"],
-  ["Andrés Molina", "Promoción 2017", "Científico de datos", "Monterrey", "México"],
-  ["Elena Fuentes", "Promoción 2017", "Gestora cultural", "Cusco", "Perú"],
-  ["Gabriel Paz", "Promoción 2017", "Abogado corporativo", "Santiago", "Chile"],
-  ["Martina Robles", "Promoción 2018", "UX Researcher", "Lima", "Perú"],
-  ["Samuel Herrera", "Promoción 2018", "Consultor estratégico", "Ciudad de México", "México"],
-  ["Paula Navarro", "Promoción 2018", "Fotógrafa documental", "Quito", "Ecuador"],
-  ["Emilio Vargas", "Promoción 2019", "Ingeniero biomédico", "Lima", "Perú"],
-  ["Antonia Flores", "Promoción 2019", "Fundadora de ONG", "Bogotá", "Colombia"],
-  ["Rodrigo Silva", "Promoción 2019", "Especialista en growth", "Montevideo", "Uruguay"],
-  ["Isabella Castro", "Promoción 2019", "Médica residente", "Trujillo", "Perú"],
-  ["Bruno Acosta", "Promoción 2020", "Desarrollador móvil", "Lima", "Perú"],
-  ["Emma Villanueva", "Promoción 2020", "Analista de políticas", "Bogotá", "Colombia"],
-  ["Lorenzo Méndez", "Promoción 2020", "Productor musical", "Buenos Aires", "Argentina"],
-  ["Julieta Campos", "Promoción 2020", "Ingeniera ambiental", "Arequipa", "Perú"],
-  ["Thiago Morales", "Promoción 2021", "Analista financiero", "Lima", "Perú"],
-  ["Valentina Soto", "Promoción 2021", "Diseñadora industrial", "Santiago", "Chile"],
-  ["Franco Lozano", "Promoción 2021", "Emprendedor fintech", "Medellín", "Colombia"],
-  ["Mía Espinoza", "Promoción 2021", "Comunicadora digital", "Piura", "Perú"],
-  ["Lucas Benavides", "Promoción 2022", "Machine Learning Engineer", "Lima", "Perú"],
-  ["Catalina Arias", "Promoción 2022", "Bióloga marina", "Guayaquil", "Ecuador"],
-  ["Matías Aguilar", "Promoción 2022", "Estratega de producto", "Bogotá", "Colombia"],
-  ["Amelia Ramos", "Promoción 2022", "Curadora de arte", "Ciudad de México", "México"],
-  ["Benjamín Prieto", "Promoción 2022", "Fundador de climate tech", "Lima", "Perú"],
-] as const;
-
-const additionalDemoProfiles: Profile[] = demoExpansionSeeds.map((seed, index) => ({
-  id: `a${index + 9}`,
-  clerk_user_id: `demo_member_${index + 9}`,
-  full_name: seed[0],
-  photo_url: index % 3 === 0 ? `https://i.pravatar.cc/320?img=${index + 9}` : null,
-  bio: `Parte de ${seed[1]}. Me interesa compartir aprendizajes, abrir oportunidades y mantener viva esta comunidad.`,
-  cohort: seed[1],
-  birth_date: `${1994 + (index % 9)}-${String((index % 12) + 1).padStart(2, "0")}-${String((index % 24) + 1).padStart(2, "0")}`,
-  city: seed[3],
-  country: seed[4],
-  profession: seed[2],
-  linkedin_url: index % 2 === 0 ? "https://www.linkedin.com" : null,
-  enrolled_by_id: `a${(index % 8) + 1}`,
-  created_at: `2026-07-${String((index % 27) + 1).padStart(2, "0")}T00:00:00Z`,
-  updated_at: "2026-08-08T00:00:00Z",
-}));
-
-const demoProfiles: Profile[] = [...coreDemoProfiles, ...additionalDemoProfiles].map((profile) => ({
-  ...profile,
-  cohort: legacyCohortToLima(profile.cohort),
-}));
 
 const emptyDraft: ProfileDraft = {
   full_name: "",
@@ -488,7 +314,7 @@ function createSupabase(config: NexoConfig, getToken: () => Promise<string | nul
 
 function useProfiles(userId: string, config: NexoConfig, getToken?: () => Promise<string | null>) {
   const live = Boolean(config.supabaseUrl && config.supabasePublishableKey && getToken);
-  const [profiles, setProfiles] = useState<Profile[]>(demoProfiles);
+  const [profiles, setProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(live);
   const [error, setError] = useState<string | null>(null);
   const client = useMemo(
@@ -615,23 +441,31 @@ export default function NexoApp({ config }: { config: NexoConfig }) {
 
   if (config.clerkPublishableKey) {
     return (
-      <ClerkProvider
-        publishableKey={config.clerkPublishableKey}
-        signInForceRedirectUrl={authRedirectUrl}
-        signUpForceRedirectUrl={authRedirectUrl}
-        signInFallbackRedirectUrl={authRedirectUrl}
-        signUpFallbackRedirectUrl={authRedirectUrl}
-        afterSignOutUrl={authRedirectUrl}
-        appearance={{
-          variables: { colorPrimary: "#e36b52", colorText: "#182b3a", borderRadius: "0.65rem" },
-        }}
-      >
-        <ClerkExperience config={config} />
-      </ClerkProvider>
+      <>
+        <ClerkProvider
+          publishableKey={config.clerkPublishableKey}
+          signInForceRedirectUrl={authRedirectUrl}
+          signUpForceRedirectUrl={authRedirectUrl}
+          signInFallbackRedirectUrl={authRedirectUrl}
+          signUpFallbackRedirectUrl={authRedirectUrl}
+          afterSignOutUrl={authRedirectUrl}
+          appearance={{
+            variables: { colorPrimary: "#e36b52", colorText: "#182b3a", borderRadius: "0.65rem" },
+          }}
+        >
+          <ClerkExperience config={config} />
+        </ClerkProvider>
+        <ValEasterEgg />
+      </>
     );
   }
 
-  return <DemoExperience />;
+  return (
+    <>
+      <Landing action={<span className="member-access"><ShieldCheck size={16} /> Acceso para miembros</span>} />
+      <ValEasterEgg />
+    </>
+  );
 }
 
 function ClerkExperience({ config }: { config: NexoConfig }) {
@@ -692,33 +526,6 @@ function AuthActions({ appUrl }: { appUrl: string }) {
   );
 }
 
-function DemoExperience() {
-  const [entered, setEntered] = useState(false);
-
-  if (!entered) {
-    return (
-      <Landing
-        isDemo
-        action={
-          <button className="primary-button" type="button" onClick={() => setEntered(true)}>
-            Explorar la demo <ArrowRight size={17} />
-          </button>
-        }
-      />
-    );
-  }
-
-  return (
-    <Workspace
-      userId="demo_piero"
-      userName="Piero Gutiérrez"
-      userImage={demoProfiles[0].photo_url ?? undefined}
-      config={{ clerkPublishableKey: "", supabaseUrl: "", supabasePublishableKey: "" }}
-      accountControl={<button className="demo-avatar" onClick={() => setEntered(false)} aria-label="Salir de la demo">PG</button>}
-    />
-  );
-}
-
 function LoadingScreen() {
   return (
     <div className="loading-screen">
@@ -729,21 +536,32 @@ function LoadingScreen() {
 }
 
 function Brand({ inverse = false }: { inverse?: boolean }) {
+  const secretClicks = useRef(0);
+  const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleSecretClick = () => {
+    secretClicks.current += 1;
+    if (resetTimer.current) clearTimeout(resetTimer.current);
+    resetTimer.current = setTimeout(() => { secretClicks.current = 0; }, 1800);
+    if (secretClicks.current >= 5) {
+      secretClicks.current = 0;
+      revealValEasterEgg();
+    }
+  };
+
   return (
     <div className={`brand ${inverse ? "brand-inverse" : ""}`}>
-      <span className="brand-mark">N</span>
+      <button className="brand-mark brand-secret" type="button" onClick={handleSecretClick} aria-label="Logo de Nexo">N</button>
       <span>Nexo</span>
     </div>
   );
 }
 
-function Landing({ action, isDemo = false }: { action: React.ReactNode; isDemo?: boolean }) {
+function Landing({ action }: { action: React.ReactNode }) {
   return (
     <main className="landing">
       <header className="landing-header">
         <Brand />
         <div className="landing-header-actions">
-          {isDemo && <span className="demo-note">Modo demostración</span>}
           {action}
         </div>
       </header>
@@ -768,22 +586,22 @@ function Landing({ action, isDemo = false }: { action: React.ReactNode; isDemo?:
           <div className="connection-line line-one" />
           <div className="connection-line line-two" />
           <div className="preview-node node-main">
-            <Avatar profile={demoProfiles[0]} size="hero" />
-            <div><strong>Piero</strong><span>Lima 201</span></div>
+            <span className="preview-avatar preview-avatar-main"><CircleUserRound /></span>
+            <div><strong>Tu perfil</strong><span>Tu historia</span></div>
           </div>
           <div className="preview-node node-top">
-            <Avatar profile={demoProfiles[1]} size="medium" />
-            <div><strong>Valeria</strong><span>Te enroló</span></div>
+            <span className="preview-avatar"><Heart /></span>
+            <div><strong>Tu nexo</strong><span>Quien te invitó</span></div>
           </div>
           <div className="preview-node node-right">
-            <Avatar profile={demoProfiles[2]} size="medium" />
-            <div><strong>Mateo</strong><span>Enrolado por ti</span></div>
+            <span className="preview-avatar"><Link2 /></span>
+            <div><strong>Conexiones</strong><span>Personas que sumaste</span></div>
           </div>
           <div className="preview-node node-bottom">
-            <Avatar profile={demoProfiles[3]} size="small" />
-            <div><strong>Inés</strong></div>
+            <span className="preview-avatar preview-avatar-small"><Users /></span>
+            <div><strong>Comunidad</strong></div>
           </div>
-          <div className="preview-label"><Users size={15} /> 40 personas conectadas</div>
+          <div className="preview-label"><Users size={15} /> Historias que se conectan</div>
         </div>
       </section>
 
@@ -838,7 +656,7 @@ function Workspace({
     return next;
   });
   const currentProfile = profiles.find((profile) => profile.clerk_user_id === userId);
-  const displayProfile = currentProfile ?? (live ? {
+  const displayProfile = currentProfile ?? {
     id: "",
     clerk_user_id: userId,
     full_name: userName,
@@ -866,12 +684,7 @@ function Workspace({
     enrolled_by_id: null,
     created_at: "",
     updated_at: "",
-  } : {
-    ...demoProfiles[0],
-    clerk_user_id: userId,
-    full_name: userName,
-    photo_url: userImage ?? demoProfiles[0].photo_url,
-  });
+  };
 
   const shouldOnboard = live && !loading && !currentProfile;
   const removeAccount = async () => {
@@ -930,8 +743,8 @@ function Workspace({
           <NavButton icon={<UserRoundPen />} label="Mi perfil" active={view === "profile"} onClick={() => navigate("profile")} />
         </nav>
         <div className="sidebar-footer">
-          <span className="sidebar-status"><span className={`status-dot ${live ? "status-live" : ""}`} />{live ? "Conectado" : "Demostración"}</span>
-          <span className="app-version">v{APP_VERSION}</span>
+          <span className="sidebar-status"><span className={`status-dot ${live ? "status-live" : ""}`} />{live ? "Conectado" : "Sin conexión"}</span>
+          <button className="app-version" type="button" onClick={revealValEasterEgg} aria-label="Créditos de Nexo" title="Créditos">v{APP_VERSION}</button>
         </div>
       </aside>
       {mobileNav && <button className="nav-backdrop" aria-label="Cerrar menú" onClick={() => setMobileNav(false)} />}
@@ -1008,6 +821,70 @@ function Workspace({
         />
       )}
       {deletingAccount && <AccountDeletionDialog onClose={() => setDeletingAccount(false)} onConfirm={removeAccount} />}
+    </div>
+  );
+}
+
+function ValEasterEgg() {
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    const reveal = () => setOpen(true);
+    window.addEventListener(EASTER_EGG_EVENT, reveal);
+    return () => window.removeEventListener(EASTER_EGG_EVENT, reveal);
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
+  if (!open) return null;
+
+  return (
+    <div className="val-easter-egg" role="presentation" onMouseDown={(event) => {
+      if (event.target === event.currentTarget) setOpen(false);
+    }}>
+      <div className="val-confetti" aria-hidden="true">
+        {valParticles.map((particle) => (
+          <span
+            key={particle.id}
+            className={particle.id % 3 === 0 ? "val-particle val-particle-heart" : "val-particle"}
+            style={{
+              "--particle-left": particle.left,
+              "--particle-delay": particle.delay,
+              "--particle-duration": particle.duration,
+              "--particle-drift": particle.drift,
+              "--particle-size": particle.size,
+            } as CSSProperties}
+          >{particle.id % 3 === 0 ? "♥" : "✦"}</span>
+        ))}
+      </div>
+      <section className="val-card" role="dialog" aria-modal="true" aria-labelledby="val-easter-egg-title">
+        <button className="val-close" type="button" onClick={() => setOpen(false)} aria-label="Cerrar mensaje de Val"><X size={19} /></button>
+        <div className="val-portrait-wrap">
+          <span className="val-orbit val-orbit-one" aria-hidden="true"><Heart /></span>
+          <span className="val-orbit val-orbit-two" aria-hidden="true"><Sparkles /></span>
+          {/* This is Val's illustration, supplied for the hidden creator credit. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/val-easter-egg.jpeg" alt="Ilustración de Val haciendo el gesto de aprobación" />
+        </div>
+        <div className="val-message">
+          <span className="val-kicker"><Sparkles size={14} /> Encontraste un pedacito secreto</span>
+          <h2 id="val-easter-egg-title">Este software lo creé yo, <em>Val</em>, con cariño.</h2>
+          <p>Cada conexión, detalle y color fue pensado para acercarnos un poquito más.</p>
+          <span className="val-signature">Hecho con <Heart size={15} fill="currentColor" /> para esta comunidad</span>
+        </div>
+      </section>
     </div>
   );
 }

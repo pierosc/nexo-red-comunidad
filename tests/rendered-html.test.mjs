@@ -21,7 +21,9 @@ test("server-renders Nexo", async () => {
   const html = await response.text();
   assert.match(html, /<title>Nexo/);
   assert.match(html, /Las historias que nos/);
-  assert.match(html, /Explorar la demo/);
+  assert.match(html, /Acceso para miembros/);
+  assert.match(html, /Tu perfil/);
+  assert.doesNotMatch(html, /Explorar la demo/);
   assert.doesNotMatch(html, /codex-preview/);
   assert.doesNotMatch(html, /react-loading-skeleton/);
 });
