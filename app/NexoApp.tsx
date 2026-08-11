@@ -854,13 +854,8 @@ function ValEasterEgg() {
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") setOpen(false);
     };
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
     window.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      window.removeEventListener("keydown", closeOnEscape);
-    };
+    return () => window.removeEventListener("keydown", closeOnEscape);
   }, [open]);
 
   if (!open) return null;
@@ -884,7 +879,7 @@ function ValEasterEgg() {
           >{particle.id % 3 === 0 ? "♥" : "✦"}</span>
         ))}
       </div>
-      <section className="val-card" role="dialog" aria-modal="true" aria-labelledby="val-easter-egg-title">
+      <section className="val-card" role="dialog" aria-labelledby="val-easter-egg-title">
         <button className="val-close" type="button" onClick={() => setOpen(false)} aria-label="Cerrar mensaje de Val"><X size={19} /></button>
         <div className="val-portrait-wrap">
           <span className="val-orbit val-orbit-one" aria-hidden="true"><Heart /></span>
