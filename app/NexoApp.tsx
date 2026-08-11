@@ -455,7 +455,7 @@ export default function NexoApp({ config }: { config: NexoConfig }) {
         >
           <ClerkExperience config={config} />
         </ClerkProvider>
-        <ValEasterEgg />
+        <ValEasterEggAccess />
       </>
     );
   }
@@ -463,7 +463,7 @@ export default function NexoApp({ config }: { config: NexoConfig }) {
   return (
     <>
       <Landing action={<span className="member-access"><ShieldCheck size={16} /> Acceso para miembros</span>} />
-      <ValEasterEgg />
+      <ValEasterEggAccess />
     </>
   );
 }
@@ -822,6 +822,18 @@ function Workspace({
       )}
       {deletingAccount && <AccountDeletionDialog onClose={() => setDeletingAccount(false)} onConfirm={removeAccount} />}
     </div>
+  );
+}
+
+function ValEasterEggAccess() {
+  return (
+    <>
+      <button className="val-mini-button" type="button" onClick={revealValEasterEgg} aria-label="Abrir mensaje secreto de Val" title="Un detalle de Val">
+        <Heart size={14} fill="currentColor" />
+        <span>por Val</span>
+      </button>
+      <ValEasterEgg />
+    </>
   );
 }
 
