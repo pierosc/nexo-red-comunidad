@@ -60,7 +60,7 @@ import {
 
 type View = "home" | "directory" | "connections" | "profile";
 
-const APP_VERSION = "1.0.29";
+const APP_VERSION = "1.0.30";
 const EASTER_EGG_EVENT = "nexo:val-easter-egg";
 
 const valParticles = Array.from({ length: 18 }, (_, index) => ({
@@ -90,6 +90,50 @@ const STRETCHING_OPTIONS = [
   "Azúcar",
 ] as const;
 
+const HOBBY_OPTIONS = [
+  "Arte y manualidades",
+  "Baile",
+  "Ciclismo",
+  "Cine y series",
+  "Cocina",
+  "Correr",
+  "Emprendimiento",
+  "Fotografía",
+  "Fútbol",
+  "Gimnasio",
+  "Jardinería",
+  "Lectura",
+  "Mascotas",
+  "Meditación",
+  "Música",
+  "Naturaleza",
+  "Senderismo",
+  "Tecnología",
+  "Viajes",
+  "Videojuegos",
+  "Vóley",
+  "Voluntariado",
+  "Yoga",
+] as const;
+
+const PROFILE_HOBBY_LIMIT = 12;
+
+function normalizeHobbies(values: readonly string[]) {
+  const normalized = new Map<string, string>();
+  values.forEach((value) => {
+    const trimmed = value.trim().replace(/\s+/g, " ").slice(0, 40);
+    if (!trimmed) return;
+    const known = HOBBY_OPTIONS.find((option) => option.localeCompare(trimmed, "es", { sensitivity: "base" }) === 0);
+    normalized.set(trimmed.toLocaleLowerCase("es"), known ?? trimmed);
+  });
+  return Array.from(normalized.values()).slice(0, PROFILE_HOBBY_LIMIT);
+}
+
+function profileHobbies(profile: Pick<Profile, "hobbies" | "hobbies_list">) {
+  if (profile.hobbies_list !== null && profile.hobbies_list !== undefined) return normalizeHobbies(profile.hobbies_list);
+  return normalizeHobbies((profile.hobbies ?? "").split(/[,;\n]+/));
+}
+
 export type Profile = {
   id: string;
   clerk_user_id: string;
@@ -114,6 +158,7 @@ export type Profile = {
   facebook_url?: string | null;
   stretching?: string | null;
   hobbies?: string | null;
+  hobbies_list?: string[] | null;
   address?: string | null;
   enrolled_by_id: string | null;
   created_at: string;
@@ -121,18 +166,24 @@ export type Profile = {
 };
 
 const RELATIONSHIP_OPTIONS = [
-  { value: "spouse", label: "Esposo/a" },
-  { value: "partner", label: "Pareja" },
-  { value: "parent", label: "Padre / madre" },
-  { value: "child", label: "Hijo/a" },
-  { value: "sibling", label: "Hermano/a" },
-  { value: "friend", label: "Amigo/a" },
-  { value: "classmate", label: "Compañero/a de promoción" },
-  { value: "colleague", label: "Colega de trabajo" },
-  { value: "mentor", label: "Mentor/a" },
-  { value: "mentee", label: "Persona mentoreada" },
-  { value: "relative", label: "Otro familiar" },
-  { value: "other", label: "Otro" },
+  { value: "spouse", label: "Esposo/a", group: "family" },
+  { value: "partner", label: "Pareja", group: "family" },
+  { value: "parent", label: "Padre / madre", group: "family" },
+  { value: "child", label: "Hijo/a", group: "family" },
+  { value: "sibling", label: "Hermano/a", group: "family" },
+  { value: "grandparent", label: "Abuelo/a", group: "family" },
+  { value: "grandchild", label: "Nieto/a", group: "family" },
+  { value: "uncle_aunt", label: "Tío/a", group: "family" },
+  { value: "nephew_niece", label: "Sobrino/a", group: "family" },
+  { value: "cousin", label: "Primo/a", group: "family" },
+  { value: "relative", label: "Familiar", group: "family" },
+  { value: "friend", label: "Amigo/a", group: "social" },
+  { value: "classmate", label: "Compañero/a de promoción", group: "social" },
+  { value: "colleague", label: "Colega de trabajo", group: "social" },
+  { value: "mentor", label: "Mentor/a", group: "social" },
+  { value: "mentee", label: "Persona mentoreada", group: "social" },
+  { value: "neighbor", label: "Vecino/a", group: "social" },
+  { value: "other", label: "Otro", group: "other" },
 ] as const;
 
 type RelationshipType = (typeof RELATIONSHIP_OPTIONS)[number]["value"];
@@ -163,11 +214,17 @@ function relationshipLabel(relationship: ProfileRelationship, incoming: boolean)
     parent: ["Padre / madre", "Hijo/a"],
     child: ["Hijo/a", "Padre / madre"],
     sibling: ["Hermano/a", "Hermano/a"],
+    grandparent: ["Abuelo/a", "Nieto/a"],
+    grandchild: ["Nieto/a", "Abuelo/a"],
+    uncle_aunt: ["Tío/a", "Sobrino/a"],
+    nephew_niece: ["Sobrino/a", "Tío/a"],
+    cousin: ["Primo/a", "Primo/a"],
     friend: ["Amigo/a", "Amigo/a"],
     classmate: ["Compañero/a de promoción", "Compañero/a de promoción"],
     colleague: ["Colega de trabajo", "Colega de trabajo"],
     mentor: ["Mentor/a", "Persona mentoreada"],
     mentee: ["Persona mentoreada", "Mentor/a"],
+    neighbor: ["Vecino/a", "Vecino/a"],
     relative: ["Familiar", "Familiar"],
   };
   return labels[relationship.relationship_type][incoming ? 1 : 0];
@@ -216,6 +273,7 @@ type ProfileDraft = Pick<
   | "facebook_url"
   | "stretching"
   | "hobbies"
+  | "hobbies_list"
   | "address"
   | "enrolled_by_id"
 >;
@@ -249,6 +307,7 @@ const emptyDraft: ProfileDraft = {
   facebook_url: "",
   stretching: "",
   hobbies: "",
+  hobbies_list: [],
   address: "",
   enrolled_by_id: null,
 };
@@ -433,6 +492,7 @@ function useProfiles(userId: string, config: NexoConfig, getToken?: () => Promis
   const saveProfile = useCallback(
     async (draft: ProfileDraft, current?: Profile) => {
       const now = new Date().toISOString();
+      const hobbies = normalizeHobbies(draft.hobbies_list ?? (draft.hobbies ?? "").split(/[,;\n]+/));
       const record: Profile = {
         ...draft,
         id: current?.id ?? crypto.randomUUID(),
@@ -456,7 +516,8 @@ function useProfiles(userId: string, config: NexoConfig, getToken?: () => Promis
         phone: draft.phone?.trim() || null,
         facebook_url: normalizeFacebook(draft.facebook_url),
         stretching: draft.stretching || null,
-        hobbies: draft.hobbies || null,
+        hobbies: hobbies.join(", ") || null,
+        hobbies_list: hobbies,
         address: draft.address || null,
         enrolled_by_id: draft.enrolled_by_id || null,
         created_at: current?.created_at ?? now,
@@ -521,14 +582,11 @@ function useProfiles(userId: string, config: NexoConfig, getToken?: () => Promis
       }
 
       if (client) {
-        const { error: relationshipError } = await client
-          .from("profile_relationships")
-          .upsert({
-            profile_id: profileId,
-            related_profile_id: relatedProfileId,
-            relationship_type: relationshipType,
-            custom_label: normalizedLabel,
-          }, { onConflict: "profile_id,related_profile_id,relationship_type" });
+        const { error: relationshipError } = await client.rpc("set_profile_relationship", {
+          p_related_profile_id: relatedProfileId,
+          p_relationship_type: relationshipType,
+          p_custom_label: normalizedLabel,
+        });
         if (relationshipError) throw relationshipError;
         await refresh();
         return;
@@ -537,13 +595,12 @@ function useProfiles(userId: string, config: NexoConfig, getToken?: () => Promis
       const now = new Date().toISOString();
       setRelationships((previous) => {
         const existing = previous.find((relationship) => (
-          relationship.profile_id === profileId
-          && relationship.related_profile_id === relatedProfileId
-          && relationship.relationship_type === relationshipType
+          (relationship.profile_id === profileId && relationship.related_profile_id === relatedProfileId)
+          || (relationship.profile_id === relatedProfileId && relationship.related_profile_id === profileId)
         ));
         if (existing) {
           return previous.map((relationship) => relationship.id === existing.id
-            ? { ...relationship, custom_label: normalizedLabel, updated_at: now }
+            ? { ...relationship, profile_id: profileId, related_profile_id: relatedProfileId, relationship_type: relationshipType, custom_label: normalizedLabel, updated_at: now }
             : relationship);
         }
         return [...previous, {
@@ -818,6 +875,7 @@ function Workspace({
     facebook_url: null,
     stretching: null,
     hobbies: null,
+    hobbies_list: [],
     address: null,
     enrolled_by_id: null,
     created_at: "",
@@ -1166,6 +1224,22 @@ type NetworkEdge = {
   tone: "primary" | "secondary";
 };
 
+function networkRelationLabel(relation: NetworkRelation) {
+  const labels: Record<NetworkRelation, string> = {
+    self: "TÚ",
+    mentor: "TE ENROLÓ",
+    child: "ENROLADO POR TI",
+    sibling: "MISMA RAMA",
+    grandchild: "SIGUIENTE GENERACIÓN",
+    related: "RELACIÓN",
+  };
+  return labels[relation];
+}
+
+function profilePairKey(firstId: string, secondId: string) {
+  return [firstId, secondId].sort().join(":");
+}
+
 function buildLivingNetwork(profile: Profile, profiles: Profile[], relationships: ProfileRelationship[]) {
   const points: NetworkPoint[] = [{ profile, relation: "self", x: 0, y: 0, delay: 0 }];
   const edges: NetworkEdge[] = [];
@@ -1231,22 +1305,38 @@ function buildLivingNetwork(profile: Profile, profiles: Profile[], relationships
     { x: -510, y: 350 },
     { x: 510, y: 350 },
   ];
-  const visibleProfileIds = new Set(points.map((point) => point.profile.id));
-  const personalRelationships = relationshipsForProfile(profile.id, profiles, relationships)
-    .filter((relationship) => !visibleProfileIds.has(relationship.profile.id))
-    .slice(0, relationshipPositions.length);
-  personalRelationships.forEach((relationship, index) => {
-    const position = relationshipPositions[index];
+  const personalRelationships = relationshipsForProfile(profile.id, profiles, relationships);
+  const edgeKeys = new Set(edges.map((edge) => profilePairKey(edge.from.profile.id, edge.to.profile.id)));
+  let newRelationshipIndex = 0;
+  personalRelationships.forEach((relationship) => {
+    const existingPoint = points.find((point) => point.profile.id === relationship.profile.id);
+    if (existingPoint) {
+      const baseLabel = existingPoint.label ?? networkRelationLabel(existingPoint.relation);
+      if (!baseLabel.toLocaleLowerCase("es").includes(relationship.label.toLocaleLowerCase("es"))) {
+        existingPoint.label = `${baseLabel} · ${relationship.label}`;
+      }
+      const key = profilePairKey(profile.id, relationship.profile.id);
+      if (!edgeKeys.has(key)) {
+        edges.push({ from: points[0], to: existingPoint, tone: "secondary" });
+        edgeKeys.add(key);
+      }
+      return;
+    }
+
+    const position = relationshipPositions[newRelationshipIndex];
+    if (!position) return;
     const point: NetworkPoint = {
       profile: relationship.profile,
       relation: "related",
       label: relationship.label,
       x: position.x,
       y: position.y,
-      delay: index + 7,
+      delay: newRelationshipIndex + 7,
     };
     points.push(point);
     edges.push({ from: points[0], to: point, tone: "secondary" });
+    edgeKeys.add(profilePairKey(profile.id, relationship.profile.id));
+    newRelationshipIndex += 1;
   });
 
   return { points, edges, mentor, directChildren, personalRelationships };
@@ -1274,14 +1364,6 @@ function LivingEdge({ edge, index }: { edge: NetworkEdge; index: number }) {
 }
 
 function LivingNode({ point, onOpen }: { point: NetworkPoint; onOpen: (profile: Profile) => void }) {
-  const relationLabel: Record<NetworkRelation, string> = {
-    self: "TÚ",
-    mentor: "TE ENROLÓ",
-    child: "ENROLADO POR TI",
-    sibling: "MISMA RAMA",
-    grandchild: "SIGUIENTE GENERACIÓN",
-    related: point.label?.toUpperCase() || "RELACIÓN",
-  };
   const style = {
     "--node-left": `calc(50% + ${point.x}px)`,
     "--node-top": `calc(50% + ${point.y}px)`,
@@ -1298,7 +1380,7 @@ function LivingNode({ point, onOpen }: { point: NetworkPoint; onOpen: (profile: 
     >
       <span className="node-aura"><i /><i /><i /></span>
       <Avatar profile={point.profile} size={point.relation === "self" ? "hero" : "large"} />
-      <span className="living-node-relation">{relationLabel[point.relation]}</span>
+      <span className="living-node-relation">{point.label?.toUpperCase() || networkRelationLabel(point.relation)}</span>
       <strong>{point.profile.full_name}</strong>
       <small>{point.profile.profession ?? point.profile.cohort}</small>
       <span className="living-node-cohort">{point.profile.cohort}</span>
@@ -1321,6 +1403,16 @@ type CohortConnectionLayout = {
   toName: string;
   fromCohort: string;
   toCohort: string;
+  kind: "enrollment" | "relationship";
+  label: string;
+};
+
+type ProfileConnectionPair = {
+  id: string;
+  fromId: string;
+  toId: string;
+  kind: "enrollment" | "relationship";
+  label: string;
 };
 
 type CohortFocusTarget = {
@@ -1367,8 +1459,62 @@ function buildCohortGroups(profiles: Profile[]): CohortGroup[] {
     }));
 }
 
+function buildHobbyGroups(profiles: Profile[]): CohortGroup[] {
+  const colors = ["#ef745b", "#e8a65b", "#a4bb91", "#72a9a1", "#7095bd", "#9b86bd", "#c67f9f", "#db8a70"];
+  const grouped = new Map<string, Profile[]>();
+  profiles.forEach((person) => {
+    profileHobbies(person).forEach((hobby) => grouped.set(hobby, [...(grouped.get(hobby) ?? []), person]));
+  });
+  return Array.from(grouped.entries())
+    .sort(([firstHobby, firstMembers], [secondHobby, secondMembers]) => secondMembers.length - firstMembers.length || firstHobby.localeCompare(secondHobby, "es"))
+    .map(([cohort, members], index) => ({ cohort, members, color: colors[index % colors.length] }));
+}
+
+function buildProfileConnectionPairs(profiles: Profile[], relationships: ProfileRelationship[]) {
+  const profileById = new Map(profiles.map((profile) => [profile.id, profile]));
+  const pairs = new Map<string, ProfileConnectionPair>();
+
+  profiles.forEach((person) => {
+    if (!person.enrolled_by_id) return;
+    const enroller = profileById.get(person.enrolled_by_id);
+    if (!enroller) return;
+    const id = profilePairKey(enroller.id, person.id);
+    pairs.set(id, {
+      id,
+      fromId: enroller.id,
+      toId: person.id,
+      kind: "enrollment",
+      label: `${enroller.full_name} enroló a ${person.full_name}`,
+    });
+  });
+
+  relationships.forEach((relationship) => {
+    const from = profileById.get(relationship.profile_id);
+    const to = profileById.get(relationship.related_profile_id);
+    if (!from || !to) return;
+    const id = profilePairKey(from.id, to.id);
+    const label = relationshipLabel(relationship, false);
+    const existing = pairs.get(id);
+    if (existing) {
+      if (!existing.label.toLocaleLowerCase("es").includes(label.toLocaleLowerCase("es"))) existing.label = `${existing.label} · ${label}`;
+      return;
+    }
+    pairs.set(id, {
+      id,
+      fromId: from.id,
+      toId: to.id,
+      kind: "relationship",
+      label: `${from.full_name} y ${to.full_name}: ${label}`,
+    });
+  });
+
+  return Array.from(pairs.values());
+}
+
 function CohortGalaxy({
   profiles,
+  relationships,
+  groupMode,
   selectedCohort,
   pan,
   zoom,
@@ -1377,6 +1523,8 @@ function CohortGalaxy({
   onOpen,
 }: {
   profiles: Profile[];
+  relationships: ProfileRelationship[];
+  groupMode: "cohorts" | "hobbies";
   selectedCohort: string | null;
   pan: { x: number; y: number };
   zoom: number;
@@ -1384,8 +1532,9 @@ function CohortGalaxy({
   onCenterCohort: (target: CohortFocusTarget) => void;
   onOpen: (profile: Profile) => void;
 }) {
-  const groups = useMemo(() => buildCohortGroups(profiles), [profiles]);
+  const groups = useMemo(() => groupMode === "cohorts" ? buildCohortGroups(profiles) : buildHobbyGroups(profiles), [groupMode, profiles]);
   const profileById = useMemo(() => new Map(profiles.map((profile) => [profile.id, profile])), [profiles]);
+  const connectionPairs = useMemo(() => buildProfileConnectionPairs(profiles, relationships), [profiles, relationships]);
   const [cohortQuery, setCohortQuery] = useState("");
   const [hoveredProfileId, setHoveredProfileId] = useState<string | null>(null);
   const [connectionLayout, setConnectionLayout] = useState<{ width: number; height: number; edges: CohortConnectionLayout[] }>({ width: 0, height: 0, edges: [] });
@@ -1402,12 +1551,17 @@ function CohortGalaxy({
     const measureConnections = () => {
       const edges: CohortConnectionLayout[] = [];
 
-      profiles.forEach((person) => {
-        if (!person.enrolled_by_id) return;
-        const enroller = profileById.get(person.enrolled_by_id);
-        const fromNode = memberRefs.current.get(person.enrolled_by_id);
-        const toNode = memberRefs.current.get(person.id);
-        if (!enroller || !fromNode || !toNode) return;
+      if (groupMode === "hobbies") {
+        setConnectionLayout({ width: stack.scrollWidth, height: stack.scrollHeight, edges });
+        return;
+      }
+
+      connectionPairs.forEach((connection) => {
+        const fromProfile = profileById.get(connection.fromId);
+        const toProfile = profileById.get(connection.toId);
+        const fromNode = memberRefs.current.get(connection.fromId);
+        const toNode = memberRefs.current.get(connection.toId);
+        if (!fromProfile || !toProfile || !fromNode || !toNode) return;
 
         const fromAvatar = fromNode.querySelector<HTMLElement>(".avatar") ?? fromNode;
         const toAvatar = toNode.querySelector<HTMLElement>(".avatar") ?? toNode;
@@ -1438,14 +1592,16 @@ function CohortGalaxy({
         }
 
         edges.push({
-          id: `${enroller.id}-${person.id}`,
+          id: connection.id,
           d,
-          fromId: enroller.id,
-          toId: person.id,
-          fromName: enroller.full_name,
-          toName: person.full_name,
-          fromCohort: enroller.cohort,
-          toCohort: person.cohort,
+          fromId: fromProfile.id,
+          toId: toProfile.id,
+          fromName: fromProfile.full_name,
+          toName: toProfile.full_name,
+          fromCohort: fromProfile.cohort,
+          toCohort: toProfile.cohort,
+          kind: connection.kind,
+          label: connection.label,
         });
       });
 
@@ -1466,7 +1622,7 @@ function CohortGalaxy({
       window.removeEventListener("resize", scheduleMeasurement);
       stack.removeEventListener("animationend", scheduleMeasurement, true);
     };
-  }, [profileById, profiles]);
+  }, [connectionPairs, groupMode, profileById]);
 
   const relatedProfileIds = useMemo(() => {
     const ids = new Set<string>();
@@ -1476,8 +1632,12 @@ function CohortGalaxy({
       if (person.enrolled_by_id === hoveredProfileId) ids.add(person.id);
       if (person.id === hoveredProfileId && person.enrolled_by_id) ids.add(person.enrolled_by_id);
     });
+    relationships.forEach((relationship) => {
+      if (relationship.profile_id === hoveredProfileId) ids.add(relationship.related_profile_id);
+      if (relationship.related_profile_id === hoveredProfileId) ids.add(relationship.profile_id);
+    });
     return ids;
-  }, [hoveredProfileId, profiles]);
+  }, [hoveredProfileId, profiles, relationships]);
 
   const centerCohort = useCallback((group: CohortGroup) => {
     const section = sectionRefs.current.get(group.cohort);
@@ -1509,7 +1669,7 @@ function CohortGalaxy({
     event.preventDefault();
     const query = cohortQuery.trim().toLowerCase();
     if (!query) return;
-    const normalized = normalizeCohort(cohortQuery).toLowerCase();
+    const normalized = groupMode === "cohorts" ? normalizeCohort(cohortQuery).toLowerCase() : query;
     const match = groups.find((group) => group.cohort.toLowerCase() === normalized)
       ?? groups.find((group) => group.cohort.toLowerCase().includes(query));
     if (match) {
@@ -1521,8 +1681,8 @@ function CohortGalaxy({
   return (
     <div className="cohort-stack-shell">
       <form className="cohort-search" onSubmit={searchCohort}>
-        <label><Search size={15} /><input aria-label="Buscar promoción Lima" list="cohort-options" value={cohortQuery} onChange={(event) => setCohortQuery(event.target.value)} placeholder="Buscar tu Lima…" /></label>
-        <datalist id="cohort-options">{groups.map((group) => <option key={group.cohort} value={group.cohort} />)}</datalist>
+        <label><Search size={15} /><input aria-label={groupMode === "cohorts" ? "Buscar promoción Lima" : "Buscar hobby"} list={`${groupMode}-options`} value={cohortQuery} onChange={(event) => setCohortQuery(event.target.value)} placeholder={groupMode === "cohorts" ? "Buscar tu Lima…" : "Buscar un hobby…"} /></label>
+        <datalist id={`${groupMode}-options`}>{groups.map((group) => <option key={group.cohort} value={group.cohort} />)}</datalist>
         <button type="submit"><LocateFixed size={15} /> Centrar</button>
       </form>
       <div
@@ -1535,17 +1695,15 @@ function CohortGalaxy({
         } as CSSProperties}
       >
         <div className="cohort-stack" ref={stackRef}>
-          {connectionLayout.width > 0 && <svg className="cohort-connection-layer" width={connectionLayout.width} height={connectionLayout.height} viewBox={`0 0 ${connectionLayout.width} ${connectionLayout.height}`} aria-hidden="true">
+          {groupMode === "cohorts" && connectionLayout.width > 0 && <svg className="cohort-connection-layer" width={connectionLayout.width} height={connectionLayout.height} viewBox={`0 0 ${connectionLayout.width} ${connectionLayout.height}`} aria-hidden="true">
             <defs>
               <marker id="cohort-arrow-direct" markerHeight="7" markerWidth="7" orient="auto" refX="6" refY="3.5"><path d="M0,0 L7,3.5 L0,7 Z" /></marker>
-              <marker id="cohort-arrow-cross" markerHeight="7" markerWidth="7" orient="auto" refX="6" refY="3.5"><path d="M0,0 L7,3.5 L0,7 Z" /></marker>
             </defs>
             {connectionLayout.edges.map((edge) => {
-              const crossCohort = edge.fromCohort !== edge.toCohort;
               const hoverActive = hoveredProfileId === edge.fromId || hoveredProfileId === edge.toId;
               const cohortActive = selectedCohort === null || selectedCohort === edge.fromCohort || selectedCohort === edge.toCohort;
               const dimmed = (hoveredProfileId !== null && !hoverActive) || !cohortActive;
-              return <path key={edge.id} className={`cohort-connection ${crossCohort ? "is-cross-cohort" : "is-same-cohort"} ${hoverActive ? "is-active" : ""} ${dimmed ? "is-dimmed" : ""}`} d={edge.d} markerEnd={`url(#${crossCohort ? "cohort-arrow-cross" : "cohort-arrow-direct"})`}><title>{edge.fromName} enroló a {edge.toName}</title></path>;
+              return <path key={edge.id} className={`cohort-connection is-${edge.kind} ${hoverActive ? "is-active" : ""} ${dimmed ? "is-dimmed" : ""}`} d={edge.d} markerEnd={edge.kind === "enrollment" ? "url(#cohort-arrow-direct)" : undefined}><title>{edge.label}</title></path>;
             })}
           </svg>}
           {groups.map((group, groupIndex) => {
@@ -1559,11 +1717,11 @@ function CohortGalaxy({
                 style={{ "--cluster-color": group.color, "--cluster-delay": `${groupIndex * 70}ms` } as CSSProperties}
                 aria-label={`${group.cohort}, ${group.members.length} personas`}
               >
-                {groupIndex === 0 && <span className="cohort-latest-badge"><Sparkles size={12} /> Lima más actual</span>}
-                <button className="cohort-stack-center" type="button" onClick={() => onSelectCohort(selected ? null : group.cohort)}>
-                  <span>Promoción</span>
+                {groupIndex === 0 && <span className="cohort-latest-badge"><Sparkles size={12} /> {groupMode === "cohorts" ? "Lima más actual" : "Hobby más compartido"}</span>}
+                <button className={`cohort-stack-center ${groupMode === "hobbies" ? "is-hobby" : ""}`} type="button" onClick={() => onSelectCohort(selected ? null : group.cohort)}>
+                  <span>{groupMode === "cohorts" ? "Promoción" : "Hobby"}</span>
                   <strong>{group.cohort}</strong>
-                  <small>{group.members.length} personas</small>
+                  <small>{group.members.length} {group.members.length === 1 ? "persona" : "personas"}</small>
                 </button>
                 <div className="cohort-members-grid">
                   {group.members.map((member, memberIndex) => (
@@ -1573,7 +1731,7 @@ function CohortGalaxy({
                       ref={(node) => { if (node) memberRefs.current.set(member.id, node); else memberRefs.current.delete(member.id); }}
                       style={{ "--member-delay": `${groupIndex * -0.35 - memberIndex * 0.08}s` } as CSSProperties}
                       type="button"
-                      title={member.enrolled_by_id && profileById.get(member.enrolled_by_id) ? `${profileById.get(member.enrolled_by_id)?.full_name} enroló a ${member.full_name}` : `${member.full_name} · inicio de esta rama`}
+                      title={groupMode === "hobbies" ? `${member.full_name} · ${group.cohort}` : member.enrolled_by_id && profileById.get(member.enrolled_by_id) ? `${profileById.get(member.enrolled_by_id)?.full_name} enroló a ${member.full_name}` : `${member.full_name} · inicio de esta rama`}
                       onMouseEnter={() => setHoveredProfileId(member.id)}
                       onMouseLeave={() => setHoveredProfileId(null)}
                       onFocus={() => setHoveredProfileId(member.id)}
@@ -1588,6 +1746,7 @@ function CohortGalaxy({
               </section>
             );
           })}
+          {!groups.length && <div className="hobby-empty-state"><Heart size={24} /><strong>Aún no hay hobbies para agrupar</strong><span>Agrega intereses desde tu perfil y aparecerán aquí.</span></div>}
         </div>
       </div>
     </div>
@@ -1597,7 +1756,8 @@ function CohortGalaxy({
 function Connections({ profile, profiles, relationships, onOpen, onAdd }: { profile: Profile; profiles: Profile[]; relationships: ProfileRelationship[]; onOpen: (profile: Profile) => void; onAdd: () => void }) {
   const network = useMemo(() => buildLivingNetwork(profile, profiles, relationships), [profile, profiles, relationships]);
   const cohortGroups = useMemo(() => buildCohortGroups(profiles), [profiles]);
-  const [networkMode, setNetworkMode] = useState<"lineage" | "cohorts">("cohorts");
+  const hobbyGroups = useMemo(() => buildHobbyGroups(profiles), [profiles]);
+  const [networkMode, setNetworkMode] = useState<"lineage" | "cohorts" | "hobbies">("cohorts");
   const [selectedCohort, setSelectedCohort] = useState<string | null>(null);
   const [zoom, setZoom] = useState(0.82);
   const [pan, setPan] = useState({ x: 0, y: 35 });
@@ -1609,7 +1769,7 @@ function Connections({ profile, profiles, relationships, onOpen, onAdd }: { prof
     setZoom(0.82);
     setPan({ x: 0, y: 35 });
   };
-  const changeMode = (mode: "lineage" | "cohorts") => {
+  const changeMode = (mode: "lineage" | "cohorts" | "hobbies") => {
     setNetworkMode(mode);
     setSelectedCohort(null);
     resetView();
@@ -1626,7 +1786,7 @@ function Connections({ profile, profiles, relationships, onOpen, onAdd }: { prof
     });
   }, [zoom]);
   const handlePointerDown = (event: ReactPointerEvent<HTMLElement>) => {
-    if ((event.target as HTMLElement).closest(".living-node, .cohort-stack-member, .cohort-stack-center, .cohort-search, .network-controls, .network-story-card, .network-mode-switch, .add-connection-button")) return;
+    if ((event.target as HTMLElement).closest(".living-node, .cohort-stack-member, .cohort-stack-center, .cohort-search, .network-controls, .network-story-card, .network-mode-switch, .mobile-network-mode-switch, .add-connection-button, .mobile-add-connection-button")) return;
     dragRef.current = { x: event.clientX, y: event.clientY, panX: pan.x, panY: pan.y };
     setDragging(true);
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -1647,7 +1807,7 @@ function Connections({ profile, profiles, relationships, onOpen, onAdd }: { prof
     <div className="connections-page living-connections page-enter">
       <section
         ref={canvasRef}
-        className={`living-canvas ${dragging ? "is-dragging" : ""} ${networkMode === "cohorts" ? "is-cohort-mode" : ""}`}
+        className={`living-canvas ${dragging ? "is-dragging" : ""} ${networkMode !== "lineage" ? "is-cohort-mode" : ""}`}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={endDrag}
@@ -1667,17 +1827,24 @@ function Connections({ profile, profiles, relationships, onOpen, onAdd }: { prof
 
         <header className="living-header">
           <div>
-            <span className="living-kicker"><Sparkles size={13} /> {networkMode === "lineage" ? "TUS VÍNCULOS" : "NUESTRA COMUNIDAD"}</span>
-            <h1>{networkMode === "lineage" ? <>Tu red está <em>viva.</em></> : <><em>{profiles.length} personas</em>, {cohortGroups.length} promociones.</>}</h1>
-            <p>{networkMode === "lineage" ? "Explora tus vínculos de familia, amistad, pareja y enrolamiento." : "Arrastra para recorrer los Limas · usa la rueda para acercar o alejar · las flechas muestran quién enroló a quién."}</p>
+            <span className="living-kicker"><Sparkles size={13} /> {networkMode === "lineage" ? "TUS VÍNCULOS" : networkMode === "cohorts" ? "NUESTRA COMUNIDAD" : "INTERESES EN COMÚN"}</span>
+            <h1>{networkMode === "lineage" ? <>Tu red está <em>viva.</em></> : networkMode === "cohorts" ? <><em>{profiles.length} personas</em>, {cohortGroups.length} promociones.</> : <><em>{hobbyGroups.length} hobbies</em> conectan a la comunidad.</>}</h1>
+            <p>{networkMode === "lineage" ? "Explora tus vínculos de familia, amistad, pareja y enrolamiento." : networkMode === "cohorts" ? "Cada pareja de personas tiene una sola línea; la flecha indica el enrolamiento." : "Descubre personas por intereses compartidos y encuentra nuevos puntos en común."}</p>
             <div className="network-mode-switch" role="group" aria-label="Agrupar conexiones">
               <button type="button" className={networkMode === "lineage" ? "active" : ""} onClick={() => changeMode("lineage")}><Network size={14} /> Mis vínculos</button>
               <button type="button" className={networkMode === "cohorts" ? "active" : ""} onClick={() => changeMode("cohorts")}><Users size={14} /> Por promociones <span>{cohortGroups.length}</span></button>
+              <button type="button" className={networkMode === "hobbies" ? "active" : ""} onClick={() => changeMode("hobbies")}><Heart size={14} /> Por hobbies <span>{hobbyGroups.length}</span></button>
             </div>
             <button className="add-connection-button" type="button" onClick={onAdd}><Plus size={16} /> Agregar relación</button>
           </div>
-          <div className="living-count"><strong>{networkMode === "lineage" ? network.points.length : profiles.length}</strong><span>personas en<br />{networkMode === "lineage" ? "tu linaje" : "la comunidad"}</span></div>
+          <div className="living-count"><strong>{networkMode === "lineage" ? network.points.length : networkMode === "cohorts" ? profiles.length : hobbyGroups.length}</strong><span>{networkMode === "hobbies" ? "hobbies en" : "personas en"}<br />{networkMode === "lineage" ? "tus vínculos" : "la comunidad"}</span></div>
         </header>
+
+        <div className="mobile-network-mode-switch" role="group" aria-label="Cambiar agrupación">
+          <button type="button" className={networkMode === "lineage" ? "active" : ""} onClick={() => changeMode("lineage")} aria-label="Ver mis vínculos"><Network size={16} /></button>
+          <button type="button" className={networkMode === "cohorts" ? "active" : ""} onClick={() => changeMode("cohorts")} aria-label="Agrupar por promociones"><Users size={16} /></button>
+          <button type="button" className={networkMode === "hobbies" ? "active" : ""} onClick={() => changeMode("hobbies")} aria-label="Agrupar por hobbies"><Heart size={16} /></button>
+        </div>
 
         <div className="network-controls" aria-label="Controles del mapa">
           <button type="button" onClick={() => adjustZoom(0.12)} aria-label="Acercar"><Plus size={17} /></button>
@@ -1704,7 +1871,7 @@ function Connections({ profile, profiles, relationships, onOpen, onAdd }: { prof
             </>
           </div>
         ) : (
-          <CohortGalaxy profiles={profiles} selectedCohort={selectedCohort} pan={pan} zoom={zoom} onSelectCohort={setSelectedCohort} onCenterCohort={centerCohort} onOpen={onOpen} />
+          <CohortGalaxy key={networkMode} profiles={profiles} relationships={relationships} groupMode={networkMode} selectedCohort={selectedCohort} pan={pan} zoom={zoom} onSelectCohort={setSelectedCohort} onCenterCohort={centerCohort} onOpen={onOpen} />
         )}
 
         {networkMode === "lineage" && (
@@ -1720,8 +1887,8 @@ function Connections({ profile, profiles, relationships, onOpen, onAdd }: { prof
         )}
 
         <div className="living-legend">
-          <span><i className="legend-coral" /> {networkMode === "lineage" ? "Conexión directa" : "Enroló a (flecha)"}</span>
-          <span><i className="legend-sage" /> {networkMode === "lineage" ? "Rama extendida" : "Conexión entre Limas"}</span>
+          <span><i className="legend-coral" /> {networkMode === "lineage" ? "Conexión directa" : networkMode === "cohorts" ? "Enrolamiento (flecha)" : "Personas con ese hobby"}</span>
+          {networkMode !== "hobbies" && <span><i className="legend-sage" /> {networkMode === "lineage" ? "Rama extendida" : "Relación personal (línea)"}</span>}
           <span className="drag-hint"><Move size={13} /> Arrastra el lienzo · rueda para zoom</span>
         </div>
         <button className="mobile-add-connection-button" type="button" onClick={onAdd}><Plus size={18} /><span>Nueva relación</span></button>
@@ -1742,7 +1909,7 @@ function MyProfile({ profile, profiles, relationships, onEdit, onOpen, onDeleteR
         <div className="identity"><span className="cohort-pill">{profile.cohort}</span><h1>{profile.full_name}</h1><p>{profile.profession}</p><div><span><MapPin size={15} /> {profile.city}, {profile.country}</span><span><CalendarDays size={15} /> {formatBirthDate(profile.birth_date)}</span></div></div>
       </div>
       <div className="profile-content-grid">
-        <section className="section-card profile-about"><span className="section-label">SOBRE MÍ</span><h2>Mi historia</h2><p>{profile.bio || "Aún no has agregado una descripción."}</p><div className="profile-detail-list">{profile.hobbies && <span><Heart size={15} /> {profile.hobbies}</span>}{profile.address && <span><MapPin size={15} /> {profile.address}</span>}{profile.stretching && <span><Sparkles size={15} /> Estiramiento: {profile.stretching}</span>}</div><div className="profile-social-links">{profile.phone && <a href={`tel:${profile.phone}`}><Phone size={16} /> {profile.phone}</a>}{profile.facebook_url && <a href={profile.facebook_url} target="_blank" rel="noreferrer"><Link2 size={16} /> Facebook <ArrowUpRight size={15} /></a>}{profile.linkedin_url && <a href={profile.linkedin_url} target="_blank" rel="noreferrer"><Link2 size={16} /> Perfil profesional <ArrowUpRight size={15} /></a>}{profile.instagram_url && <a href={profile.instagram_url} target="_blank" rel="noreferrer"><AtSign size={16} /> Instagram <ArrowUpRight size={15} /></a>}</div></section>
+        <section className="section-card profile-about"><span className="section-label">SOBRE MÍ</span><h2>Mi historia</h2><p>{profile.bio || "Aún no has agregado una descripción."}</p><div className="profile-detail-list">{profileHobbies(profile).map((hobby) => <span key={hobby}><Heart size={15} /> {hobby}</span>)}{profile.address && <span><MapPin size={15} /> {profile.address}</span>}{profile.stretching && <span><Sparkles size={15} /> Estiramiento: {profile.stretching}</span>}</div><div className="profile-social-links">{profile.phone && <a href={`tel:${profile.phone}`}><Phone size={16} /> {profile.phone}</a>}{profile.facebook_url && <a href={profile.facebook_url} target="_blank" rel="noreferrer"><Link2 size={16} /> Facebook <ArrowUpRight size={15} /></a>}{profile.linkedin_url && <a href={profile.linkedin_url} target="_blank" rel="noreferrer"><Link2 size={16} /> Perfil profesional <ArrowUpRight size={15} /></a>}{profile.instagram_url && <a href={profile.instagram_url} target="_blank" rel="noreferrer"><AtSign size={16} /> Instagram <ArrowUpRight size={15} /></a>}</div></section>
         <section className="section-card profile-links"><span className="section-label">CONEXIONES</span><h2>Mis vínculos</h2>{mentor && <ConnectionListItem label="Me enroló" profile={mentor} onClick={() => onOpen(mentor)} />}{enrolled.map((person) => <ConnectionListItem key={person.id} label="Enrolado por mí" profile={person} onClick={() => onOpen(person)} />)}{personalRelationships.map((relationship) => <ConnectionListItem key={`relationship-${relationship.id}`} label={relationship.label} profile={relationship.profile} onClick={() => onOpen(relationship.profile)} />)}{!mentor && !enrolled.length && !personalRelationships.length && <p className="muted-copy">Todavía no has agregado relaciones.</p>}</section>
       </div>
       {onDeleteRequest && <section className="account-danger-zone"><div><span className="section-label">CUENTA</span><h2>Eliminar mi cuenta</h2><p>Esta acción elimina permanentemente tu perfil, tus datos públicos y tu acceso a Nexo.</p></div><button type="button" onClick={onDeleteRequest}><Trash2 size={17} /> Eliminar cuenta</button></section>}
@@ -1801,7 +1968,7 @@ function ProfilePanel({ profile, profiles, relationships, isOwn, onClose, onOpen
           <h2>{profile.full_name}</h2>
           <p className="panel-role">{profile.profession ?? "Miembro de la comunidad"}</p>
           <div className="panel-meta">{profile.city && <span><MapPin /> {profile.city}, {profile.country}</span>}<span><CalendarDays /> {formatBirthDate(profile.birth_date)}</span></div>
-          <div className="panel-about"><span className="section-label">SU HISTORIA</span><p>{profile.bio || "Esta persona todavía no ha compartido su descripción."}</p><div className="profile-detail-list">{profile.hobbies && <span><Heart size={15} /> {profile.hobbies}</span>}{profile.address && <span><MapPin size={15} /> {profile.address}</span>}{profile.stretching && <span><Sparkles size={15} /> Estiramiento: {profile.stretching}</span>}</div></div>
+          <div className="panel-about"><span className="section-label">SU HISTORIA</span><p>{profile.bio || "Esta persona todavía no ha compartido su descripción."}</p><div className="profile-detail-list">{profileHobbies(profile).map((hobby) => <span key={hobby}><Heart size={15} /> {hobby}</span>)}{profile.address && <span><MapPin size={15} /> {profile.address}</span>}{profile.stretching && <span><Sparkles size={15} /> Estiramiento: {profile.stretching}</span>}</div></div>
           {profile.phone && <a className="panel-link" href={`tel:${profile.phone}`}><Phone size={16} /> {profile.phone}</a>}
           {profile.facebook_url && <a className="panel-link" href={profile.facebook_url} target="_blank" rel="noreferrer"><Link2 size={16} /> Ver Facebook <ArrowUpRight size={15} /></a>}
           {profile.linkedin_url && <a className="panel-link" href={profile.linkedin_url} target="_blank" rel="noreferrer"><Link2 size={16} /> Ver perfil profesional <ArrowUpRight size={15} /></a>}
@@ -1837,6 +2004,42 @@ function StretchingSelect({ value, onChange }: { value?: string | null; onChange
       <option value="">Vacío</option>
       {STRETCHING_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
     </select>
+  );
+}
+
+function HobbySelector({ value, legacyValue, onChange }: { value?: string[] | null; legacyValue?: string | null; onChange: (value: string[]) => void }) {
+  const [customHobby, setCustomHobby] = useState("");
+  const selected = normalizeHobbies(value ?? (legacyValue ?? "").split(/[,;\n]+/));
+  const selectedKeys = new Set(selected.map((hobby) => hobby.toLocaleLowerCase("es")));
+  const atLimit = selected.length >= PROFILE_HOBBY_LIMIT;
+
+  const toggleHobby = (hobby: string) => {
+    const key = hobby.toLocaleLowerCase("es");
+    onChange(selectedKeys.has(key) ? selected.filter((item) => item.toLocaleLowerCase("es") !== key) : normalizeHobbies([...selected, hobby]));
+  };
+  const addCustomHobby = () => {
+    const next = normalizeHobbies([...selected, customHobby]);
+    if (next.length === selected.length) return;
+    onChange(next);
+    setCustomHobby("");
+  };
+  const customSelections = selected.filter((hobby) => !HOBBY_OPTIONS.some((option) => option.localeCompare(hobby, "es", { sensitivity: "base" }) === 0));
+
+  return (
+    <div className="hobby-selector">
+      <div className="hobby-option-grid">
+        {HOBBY_OPTIONS.map((hobby) => {
+          const active = selectedKeys.has(hobby.toLocaleLowerCase("es"));
+          return <button key={hobby} type="button" className={active ? "active" : ""} aria-pressed={active} disabled={!active && atLimit} onClick={() => toggleHobby(hobby)}>{active ? <Check size={13} /> : <Plus size={13} />}{hobby}</button>;
+        })}
+      </div>
+      {customSelections.length > 0 && <div className="custom-hobby-list">{customSelections.map((hobby) => <button key={hobby} type="button" onClick={() => toggleHobby(hobby)}>{hobby}<X size={12} /></button>)}</div>}
+      <div className="custom-hobby-input">
+        <input value={customHobby} onChange={(event) => setCustomHobby(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addCustomHobby(); } }} maxLength={40} disabled={atLimit} placeholder="Agregar otro hobby…" />
+        <button type="button" onClick={addCustomHobby} disabled={atLimit || !customHobby.trim()}><Plus size={15} /> Agregar</button>
+      </div>
+      <small>{selected.length}/{PROFILE_HOBBY_LIMIT} seleccionados · puedes elegir varios</small>
+    </div>
   );
 }
 
@@ -2108,18 +2311,18 @@ function ConnectionEditor({
             <span>¿Qué relación tiene contigo? <b>*</b></span>
             <select value={connectionType} onChange={(event) => chooseType(event.target.value as ConnectionType | "")}>
               <option value="">Selecciona una relación</option>
-              <optgroup label="Familia, pareja y amistad">
-                {RELATIONSHIP_OPTIONS.slice(0, 7).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              <optgroup label="Familia y pareja">
+                {RELATIONSHIP_OPTIONS.filter((option) => option.group === "family").map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
               </optgroup>
-              <optgroup label="Trabajo y acompañamiento">
-                {RELATIONSHIP_OPTIONS.slice(7, 11).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              <optgroup label="Amistad, trabajo y comunidad">
+                {RELATIONSHIP_OPTIONS.filter((option) => option.group === "social").map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
               </optgroup>
               <optgroup label="Comunidad Nexo">
                 <option value="i_enrolled">Yo enrolé a esta persona</option>
                 <option value="enrolled_me">Esta persona me enroló</option>
               </optgroup>
               <optgroup label="Personalizada">
-                {RELATIONSHIP_OPTIONS.slice(11).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                {RELATIONSHIP_OPTIONS.filter((option) => option.group === "other").map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
               </optgroup>
             </select>
           </label>
@@ -2153,7 +2356,7 @@ function ProfileOnboarding({
   accountControl: React.ReactNode;
   onSave: (draft: ProfileDraft) => Promise<Profile | void>;
 }) {
-  const [draft, setDraft] = useState<ProfileDraft>({ ...emptyDraft, ...profile });
+  const [draft, setDraft] = useState<ProfileDraft>({ ...emptyDraft, ...profile, hobbies_list: profile.hobbies_list ?? profileHobbies(profile) });
   const [step, setStep] = useState(1);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -2212,7 +2415,7 @@ function ProfileOnboarding({
               <Field label="Ciudad"><input value={draft.city ?? ""} onChange={(event) => update("city", event.target.value)} placeholder="Lima" /></Field>
               <Field label="País"><input value={draft.country ?? ""} onChange={(event) => update("country", event.target.value)} placeholder="Perú" /></Field>
               <Field label="Dirección o zona"><input value={draft.address ?? ""} onChange={(event) => update("address", event.target.value)} placeholder="Miraflores, Lima" /><small>Comparte solo una referencia que quieras hacer pública.</small></Field>
-              <Field label="Hobbies e intereses"><input value={draft.hobbies ?? ""} onChange={(event) => update("hobbies", event.target.value)} placeholder="Fotografía, running, lectura…" /></Field>
+              <div className="field field-wide"><span>Hobbies e intereses</span><HobbySelector value={draft.hobbies_list} legacyValue={draft.hobbies} onChange={(value) => update("hobbies_list", value)} /></div>
               <Field label="Tu descripción" wide><textarea rows={5} maxLength={320} value={draft.bio ?? ""} onChange={(event) => update("bio", event.target.value)} placeholder="Cuéntanos brevemente quién eres, qué haces y qué te inspira." /><small>{draft.bio?.length ?? 0}/320</small></Field>
             </div></div>}
 
@@ -2238,7 +2441,7 @@ function ProfileOnboarding({
 }
 
 function ProfileEditor({ profile, profiles, onClose, onSave }: { profile: Profile; profiles: Profile[]; onClose: () => void; onSave: (draft: ProfileDraft) => Promise<void> }) {
-  const [draft, setDraft] = useState<ProfileDraft>({ ...emptyDraft, ...profile });
+  const [draft, setDraft] = useState<ProfileDraft>({ ...emptyDraft, ...profile, hobbies_list: profile.hobbies_list ?? profileHobbies(profile) });
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const update: DraftUpdater = (field, value) => setDraft((current) => ({ ...current, [field]: value }));
@@ -2264,7 +2467,7 @@ function ProfileEditor({ profile, profiles, onClose, onSave }: { profile: Profil
             <Field label="Ciudad"><input value={draft.city ?? ""} onChange={(event) => update("city", event.target.value)} placeholder="Lima" /></Field>
             <Field label="País"><input value={draft.country ?? ""} onChange={(event) => update("country", event.target.value)} placeholder="Perú" /></Field>
             <Field label="Dirección o zona"><input value={draft.address ?? ""} onChange={(event) => update("address", event.target.value)} placeholder="Miraflores, Lima" /></Field>
-            <Field label="Hobbies e intereses"><input value={draft.hobbies ?? ""} onChange={(event) => update("hobbies", event.target.value)} placeholder="Fotografía, running, lectura…" /></Field>
+            <div className="field field-wide"><span>Hobbies e intereses</span><HobbySelector value={draft.hobbies_list} legacyValue={draft.hobbies} onChange={(value) => update("hobbies_list", value)} /></div>
             <div className="field field-wide"><span>¿Quién te enroló?</span><ProfilePicker profiles={profiles} profileId={profile.id} value={draft.enrolled_by_id} onChange={(value) => update("enrolled_by_id", value)} /></div>
             <Field label="Número de teléfono"><input type="tel" inputMode="tel" value={draft.phone ?? ""} onChange={(event) => update("phone", event.target.value)} placeholder="+51 999 999 999" /></Field>
             <Field label="Facebook"><input value={draft.facebook_url ?? ""} onChange={(event) => update("facebook_url", event.target.value)} placeholder="facebook.com/tu.perfil" /></Field>

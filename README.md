@@ -8,6 +8,8 @@ Nexo es una red privada de comunidad construida con React, Clerk y Supabase. Cad
 - Directorio con búsqueda y filtros por promoción.
 - Perfiles con foto por URL, biografía, profesión, ciudad, país y fecha de nacimiento.
 - Relaciones de enrolamiento, familia, pareja, amistad, promoción, trabajo, mentoría y vínculos personalizados.
+- Hobbies seleccionables y personalizados, con una vista que agrupa a la comunidad por intereses compartidos.
+- Una sola conexión visual por pareja de personas; si también existe enrolamiento, se conserva una única flecha.
 - Edición del perfil propio con datos persistidos en Supabase.
 - Políticas RLS para que todos los miembros autenticados puedan leer perfiles y cada usuario solo pueda modificar el suyo.
 - Directorio limpio: solo muestra perfiles reales guardados en Supabase.
