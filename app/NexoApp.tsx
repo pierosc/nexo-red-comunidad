@@ -60,7 +60,7 @@ import {
 
 type View = "home" | "directory" | "connections" | "profile";
 
-const APP_VERSION = "1.0.30";
+const APP_VERSION = "1.0.31";
 const EASTER_EGG_EVENT = "nexo:val-easter-egg";
 
 const valParticles = Array.from({ length: 18 }, (_, index) => ({
@@ -117,6 +117,7 @@ const HOBBY_OPTIONS = [
 ] as const;
 
 const PROFILE_HOBBY_LIMIT = 12;
+const PROFILE_GALLERY_LIMIT = 8;
 
 function normalizeHobbies(values: readonly string[]) {
   const normalized = new Map<string, string>();
@@ -142,6 +143,7 @@ export type Profile = {
   photo_zoom?: number | null;
   photo_position_x?: number | null;
   photo_position_y?: number | null;
+  gallery_urls?: string[] | null;
   cover_url?: string | null;
   cover_zoom?: number | null;
   cover_position_x?: number | null;
@@ -257,6 +259,7 @@ type ProfileDraft = Pick<
   | "photo_zoom"
   | "photo_position_x"
   | "photo_position_y"
+  | "gallery_urls"
   | "cover_url"
   | "cover_zoom"
   | "cover_position_x"
@@ -291,6 +294,7 @@ const emptyDraft: ProfileDraft = {
   photo_zoom: 1,
   photo_position_x: 50,
   photo_position_y: 50,
+  gallery_urls: [],
   cover_url: null,
   cover_zoom: 1,
   cover_position_x: 50,
@@ -319,6 +323,21 @@ function normalizePhotoUrl(value?: string | null) {
   if (driveMatch) return `https://lh3.googleusercontent.com/d/${driveMatch[1]}=w1200`;
   if (url.includes("dropbox.com") && url.includes("dl=0")) return url.replace("dl=0", "raw=1");
   return url;
+}
+
+function normalizeGalleryUrls(values?: readonly string[] | null) {
+  const normalized = new Map<string, string>();
+  (values ?? []).forEach((value) => {
+    const url = normalizePhotoUrl(value);
+    if (!url) return;
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol === "http:" || parsed.protocol === "https:") normalized.set(url.toLocaleLowerCase(), url);
+    } catch {
+      // Invalid links are omitted from the saved gallery.
+    }
+  });
+  return Array.from(normalized.values()).slice(0, PROFILE_GALLERY_LIMIT);
 }
 
 function instagramHandle(value?: string | null) {
@@ -416,6 +435,69 @@ function Avatar({ profile, size = "medium" }: { profile: Profile; size?: "small"
   );
 }
 
+function ProfileImageDialog({ profile, imageUrl, onClose }: { profile: Profile; imageUrl: string; onClose: () => void }) {
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
+
+  return (
+    <div className="profile-image-overlay" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}>
+      <section className="profile-image-dialog" role="dialog" aria-modal="true" aria-label={`Foto ampliada de ${profile.full_name}`}>
+        <button className="close-button" type="button" onClick={onClose} aria-label="Cerrar foto ampliada"><X /></button>
+        {/* Profile images are user-provided remote URLs. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={imageUrl} alt={`Foto de ${profile.full_name}`} />
+        <footer><strong>{profile.full_name}</strong><span>{profile.cohort}</span></footer>
+      </section>
+    </div>
+  );
+}
+
+function ClickableProfilePhoto({ profile, size = "hero" }: { profile: Profile; size?: "large" | "hero" }) {
+  const photoUrl = normalizePhotoUrl(profile.photo_url);
+  const [open, setOpen] = useState(false);
+
+  if (!photoUrl) return <Avatar profile={profile} size={size} />;
+  return (
+    <>
+      <button className="profile-photo-button" type="button" onClick={() => setOpen(true)} aria-label={`Ampliar foto de ${profile.full_name}`}>
+        <Avatar profile={profile} size={size} />
+        <span className="profile-photo-zoom"><Eye size={14} /></span>
+      </button>
+      {open && <ProfileImageDialog profile={profile} imageUrl={photoUrl} onClose={() => setOpen(false)} />}
+    </>
+  );
+}
+
+function ProfileGallery({ profile }: { profile: Profile }) {
+  const images = normalizeGalleryUrls(profile.gallery_urls);
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  if (!images.length) return null;
+
+  return (
+    <>
+      <div className="profile-gallery">
+        <span className="section-label">FOTOS</span>
+        <div>
+          {images.map((url, index) => (
+            <button key={url} type="button" onClick={() => setSelectedImage(url)} aria-label={`Ampliar foto ${index + 1} de ${profile.full_name}`}>
+              {/* Profile gallery images are user-provided remote URLs. */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={url} alt="" loading="lazy" />
+              <span><Eye size={14} /></span>
+            </button>
+          ))}
+        </div>
+      </div>
+      {selectedImage && <ProfileImageDialog profile={profile} imageUrl={selectedImage} onClose={() => setSelectedImage(null)} />}
+    </>
+  );
+}
+
 function CoverMedia({ profile }: { profile: Profile }) {
   const coverUrl = normalizePhotoUrl(profile.cover_url);
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
@@ -501,6 +583,7 @@ function useProfiles(userId: string, config: NexoConfig, getToken?: () => Promis
         photo_zoom: clampPhotoValue(draft.photo_zoom, 1, 2, 1),
         photo_position_x: normalizePhotoPosition(draft.photo_position_x),
         photo_position_y: normalizePhotoPosition(draft.photo_position_y),
+        gallery_urls: normalizeGalleryUrls(draft.gallery_urls),
         cover_url: normalizePhotoUrl(draft.cover_url),
         cover_zoom: clampPhotoValue(draft.cover_zoom, 1, 2, 1),
         cover_position_x: normalizePhotoPosition(draft.cover_position_x),
@@ -859,6 +942,7 @@ function Workspace({
     photo_zoom: 1,
     photo_position_x: 50,
     photo_position_y: 50,
+    gallery_urls: [],
     cover_url: null,
     cover_zoom: 1,
     cover_position_x: 50,
@@ -1459,11 +1543,15 @@ function buildCohortGroups(profiles: Profile[]): CohortGroup[] {
     }));
 }
 
-function buildHobbyGroups(profiles: Profile[]): CohortGroup[] {
+function buildHobbyGroups(profiles: Profile[], allowedHobbies?: readonly string[]): CohortGroup[] {
   const colors = ["#ef745b", "#e8a65b", "#a4bb91", "#72a9a1", "#7095bd", "#9b86bd", "#c67f9f", "#db8a70"];
   const grouped = new Map<string, Profile[]>();
+  const allowedKeys = allowedHobbies ? new Set(allowedHobbies.map((hobby) => hobby.toLocaleLowerCase("es"))) : null;
   profiles.forEach((person) => {
-    profileHobbies(person).forEach((hobby) => grouped.set(hobby, [...(grouped.get(hobby) ?? []), person]));
+    profileHobbies(person).forEach((hobby) => {
+      if (allowedKeys && !allowedKeys.has(hobby.toLocaleLowerCase("es"))) return;
+      grouped.set(hobby, [...(grouped.get(hobby) ?? []), person]);
+    });
   });
   return Array.from(grouped.entries())
     .sort(([firstHobby, firstMembers], [secondHobby, secondMembers]) => secondMembers.length - firstMembers.length || firstHobby.localeCompare(secondHobby, "es"))
@@ -1521,6 +1609,9 @@ function CohortGalaxy({
   onSelectCohort,
   onCenterCohort,
   onOpen,
+  hobbyFilter,
+  emptyTitle,
+  emptyCopy,
 }: {
   profiles: Profile[];
   relationships: ProfileRelationship[];
@@ -1531,8 +1622,11 @@ function CohortGalaxy({
   onSelectCohort: (cohort: string | null) => void;
   onCenterCohort: (target: CohortFocusTarget) => void;
   onOpen: (profile: Profile) => void;
+  hobbyFilter?: string[];
+  emptyTitle?: string;
+  emptyCopy?: string;
 }) {
-  const groups = useMemo(() => groupMode === "cohorts" ? buildCohortGroups(profiles) : buildHobbyGroups(profiles), [groupMode, profiles]);
+  const groups = useMemo(() => groupMode === "cohorts" ? buildCohortGroups(profiles) : buildHobbyGroups(profiles, hobbyFilter), [groupMode, hobbyFilter, profiles]);
   const profileById = useMemo(() => new Map(profiles.map((profile) => [profile.id, profile])), [profiles]);
   const connectionPairs = useMemo(() => buildProfileConnectionPairs(profiles, relationships), [profiles, relationships]);
   const [cohortQuery, setCohortQuery] = useState("");
@@ -1746,7 +1840,7 @@ function CohortGalaxy({
               </section>
             );
           })}
-          {!groups.length && <div className="hobby-empty-state"><Heart size={24} /><strong>Aún no hay hobbies para agrupar</strong><span>Agrega intereses desde tu perfil y aparecerán aquí.</span></div>}
+          {!groups.length && <div className="hobby-empty-state"><Heart size={24} /><strong>{emptyTitle ?? "Aún no hay hobbies para agrupar"}</strong><span>{emptyCopy ?? "Agrega intereses desde tu perfil y aparecerán aquí."}</span></div>}
         </div>
       </div>
     </div>
@@ -1757,7 +1851,12 @@ function Connections({ profile, profiles, relationships, onOpen, onAdd }: { prof
   const network = useMemo(() => buildLivingNetwork(profile, profiles, relationships), [profile, profiles, relationships]);
   const cohortGroups = useMemo(() => buildCohortGroups(profiles), [profiles]);
   const hobbyGroups = useMemo(() => buildHobbyGroups(profiles), [profiles]);
-  const [networkMode, setNetworkMode] = useState<"lineage" | "cohorts" | "hobbies">("cohorts");
+  const myHobbies = useMemo(() => profileHobbies(profile), [profile]);
+  const sharedHobbyProfiles = useMemo(() => {
+    const myHobbyKeys = new Set(myHobbies.map((hobby) => hobby.toLocaleLowerCase("es")));
+    return profiles.filter((person) => person.id !== profile.id && profileHobbies(person).some((hobby) => myHobbyKeys.has(hobby.toLocaleLowerCase("es"))));
+  }, [myHobbies, profile.id, profiles]);
+  const [networkMode, setNetworkMode] = useState<"lineage" | "cohorts" | "hobbies" | "my_hobbies">("cohorts");
   const [selectedCohort, setSelectedCohort] = useState<string | null>(null);
   const [zoom, setZoom] = useState(0.82);
   const [pan, setPan] = useState({ x: 0, y: 35 });
@@ -1769,7 +1868,7 @@ function Connections({ profile, profiles, relationships, onOpen, onAdd }: { prof
     setZoom(0.82);
     setPan({ x: 0, y: 35 });
   };
-  const changeMode = (mode: "lineage" | "cohorts" | "hobbies") => {
+  const changeMode = (mode: "lineage" | "cohorts" | "hobbies" | "my_hobbies") => {
     setNetworkMode(mode);
     setSelectedCohort(null);
     resetView();
@@ -1827,23 +1926,25 @@ function Connections({ profile, profiles, relationships, onOpen, onAdd }: { prof
 
         <header className="living-header">
           <div>
-            <span className="living-kicker"><Sparkles size={13} /> {networkMode === "lineage" ? "TUS VÍNCULOS" : networkMode === "cohorts" ? "NUESTRA COMUNIDAD" : "INTERESES EN COMÚN"}</span>
-            <h1>{networkMode === "lineage" ? <>Tu red está <em>viva.</em></> : networkMode === "cohorts" ? <><em>{profiles.length} personas</em>, {cohortGroups.length} promociones.</> : <><em>{hobbyGroups.length} hobbies</em> conectan a la comunidad.</>}</h1>
-            <p>{networkMode === "lineage" ? "Explora tus vínculos de familia, amistad, pareja y enrolamiento." : networkMode === "cohorts" ? "Cada pareja de personas tiene una sola línea; la flecha indica el enrolamiento." : "Descubre personas por intereses compartidos y encuentra nuevos puntos en común."}</p>
+            <span className="living-kicker"><Sparkles size={13} /> {networkMode === "lineage" ? "TUS VÍNCULOS" : networkMode === "cohorts" ? "NUESTRA COMUNIDAD" : networkMode === "my_hobbies" ? "TUS INTERESES EN COMÚN" : "INTERESES EN COMÚN"}</span>
+            <h1>{networkMode === "lineage" ? <>Tu red está <em>viva.</em></> : networkMode === "cohorts" ? <><em>{profiles.length} personas</em>, {cohortGroups.length} promociones.</> : networkMode === "my_hobbies" ? <><em>{sharedHobbyProfiles.length} personas</em> comparten tus hobbies.</> : <><em>{hobbyGroups.length} hobbies</em> conectan a la comunidad.</>}</h1>
+            <p>{networkMode === "lineage" ? "Explora tus vínculos de familia, amistad, pareja y enrolamiento." : networkMode === "cohorts" ? "Cada pareja de personas tiene una sola línea; la flecha indica el enrolamiento." : networkMode === "my_hobbies" ? "Aquí solo aparecen personas con al menos un hobby en común contigo." : "Descubre personas por intereses compartidos y encuentra nuevos puntos en común."}</p>
             <div className="network-mode-switch" role="group" aria-label="Agrupar conexiones">
               <button type="button" className={networkMode === "lineage" ? "active" : ""} onClick={() => changeMode("lineage")}><Network size={14} /> Mis vínculos</button>
               <button type="button" className={networkMode === "cohorts" ? "active" : ""} onClick={() => changeMode("cohorts")}><Users size={14} /> Por promociones <span>{cohortGroups.length}</span></button>
               <button type="button" className={networkMode === "hobbies" ? "active" : ""} onClick={() => changeMode("hobbies")}><Heart size={14} /> Por hobbies <span>{hobbyGroups.length}</span></button>
+              <button type="button" className={networkMode === "my_hobbies" ? "active" : ""} onClick={() => changeMode("my_hobbies")}><CircleUserRound size={14} /> Mis hobbies <span>{sharedHobbyProfiles.length}</span></button>
             </div>
             <button className="add-connection-button" type="button" onClick={onAdd}><Plus size={16} /> Agregar relación</button>
           </div>
-          <div className="living-count"><strong>{networkMode === "lineage" ? network.points.length : networkMode === "cohorts" ? profiles.length : hobbyGroups.length}</strong><span>{networkMode === "hobbies" ? "hobbies en" : "personas en"}<br />{networkMode === "lineage" ? "tus vínculos" : "la comunidad"}</span></div>
+          <div className="living-count"><strong>{networkMode === "lineage" ? network.points.length : networkMode === "cohorts" ? profiles.length : networkMode === "my_hobbies" ? sharedHobbyProfiles.length : hobbyGroups.length}</strong><span>{networkMode === "hobbies" ? "hobbies en" : "personas en"}<br />{networkMode === "lineage" ? "tus vínculos" : networkMode === "my_hobbies" ? "tus hobbies" : "la comunidad"}</span></div>
         </header>
 
         <div className="mobile-network-mode-switch" role="group" aria-label="Cambiar agrupación">
           <button type="button" className={networkMode === "lineage" ? "active" : ""} onClick={() => changeMode("lineage")} aria-label="Ver mis vínculos"><Network size={16} /></button>
           <button type="button" className={networkMode === "cohorts" ? "active" : ""} onClick={() => changeMode("cohorts")} aria-label="Agrupar por promociones"><Users size={16} /></button>
           <button type="button" className={networkMode === "hobbies" ? "active" : ""} onClick={() => changeMode("hobbies")} aria-label="Agrupar por hobbies"><Heart size={16} /></button>
+          <button type="button" className={networkMode === "my_hobbies" ? "active" : ""} onClick={() => changeMode("my_hobbies")} aria-label="Ver personas con mis hobbies"><CircleUserRound size={16} /></button>
         </div>
 
         <div className="network-controls" aria-label="Controles del mapa">
@@ -1871,7 +1972,21 @@ function Connections({ profile, profiles, relationships, onOpen, onAdd }: { prof
             </>
           </div>
         ) : (
-          <CohortGalaxy key={networkMode} profiles={profiles} relationships={relationships} groupMode={networkMode} selectedCohort={selectedCohort} pan={pan} zoom={zoom} onSelectCohort={setSelectedCohort} onCenterCohort={centerCohort} onOpen={onOpen} />
+          <CohortGalaxy
+            key={networkMode}
+            profiles={networkMode === "my_hobbies" ? sharedHobbyProfiles : profiles}
+            relationships={relationships}
+            groupMode={networkMode === "cohorts" ? "cohorts" : "hobbies"}
+            hobbyFilter={networkMode === "my_hobbies" ? myHobbies : undefined}
+            selectedCohort={selectedCohort}
+            pan={pan}
+            zoom={zoom}
+            onSelectCohort={setSelectedCohort}
+            onCenterCohort={centerCohort}
+            onOpen={onOpen}
+            emptyTitle={networkMode === "my_hobbies" ? "Aún no encontramos coincidencias" : undefined}
+            emptyCopy={networkMode === "my_hobbies" ? "Agrega tus hobbies al perfil o vuelve más tarde cuando haya nuevas personas." : undefined}
+          />
         )}
 
         {networkMode === "lineage" && (
@@ -1887,8 +2002,8 @@ function Connections({ profile, profiles, relationships, onOpen, onAdd }: { prof
         )}
 
         <div className="living-legend">
-          <span><i className="legend-coral" /> {networkMode === "lineage" ? "Conexión directa" : networkMode === "cohorts" ? "Enrolamiento (flecha)" : "Personas con ese hobby"}</span>
-          {networkMode !== "hobbies" && <span><i className="legend-sage" /> {networkMode === "lineage" ? "Rama extendida" : "Relación personal (línea)"}</span>}
+          <span><i className="legend-coral" /> {networkMode === "lineage" ? "Conexión directa" : networkMode === "cohorts" ? "Enrolamiento (flecha)" : networkMode === "my_hobbies" ? "Personas que comparten tu hobby" : "Personas con ese hobby"}</span>
+          {networkMode !== "hobbies" && networkMode !== "my_hobbies" && <span><i className="legend-sage" /> {networkMode === "lineage" ? "Rama extendida" : "Relación personal (línea)"}</span>}
           <span className="drag-hint"><Move size={13} /> Arrastra el lienzo · rueda para zoom</span>
         </div>
         <button className="mobile-add-connection-button" type="button" onClick={onAdd}><Plus size={18} /><span>Nueva relación</span></button>
@@ -1905,11 +2020,11 @@ function MyProfile({ profile, profiles, relationships, onEdit, onOpen, onDeleteR
     <div className="my-profile page-enter">
       <div className="profile-cover"><CoverMedia profile={profile} /><div className="profile-cover-actions"><button className="preview-profile-button" onClick={() => onOpen(profile)}><Eye size={17} /> Preview</button><button className="edit-profile-button" onClick={onEdit}><UserRoundPen size={17} /> Editar perfil</button></div></div>
       <div className="profile-main-card">
-        <Avatar profile={profile} size="hero" />
+        <ClickableProfilePhoto profile={profile} size="hero" />
         <div className="identity"><span className="cohort-pill">{profile.cohort}</span><h1>{profile.full_name}</h1><p>{profile.profession}</p><div><span><MapPin size={15} /> {profile.city}, {profile.country}</span><span><CalendarDays size={15} /> {formatBirthDate(profile.birth_date)}</span></div></div>
       </div>
       <div className="profile-content-grid">
-        <section className="section-card profile-about"><span className="section-label">SOBRE MÍ</span><h2>Mi historia</h2><p>{profile.bio || "Aún no has agregado una descripción."}</p><div className="profile-detail-list">{profileHobbies(profile).map((hobby) => <span key={hobby}><Heart size={15} /> {hobby}</span>)}{profile.address && <span><MapPin size={15} /> {profile.address}</span>}{profile.stretching && <span><Sparkles size={15} /> Estiramiento: {profile.stretching}</span>}</div><div className="profile-social-links">{profile.phone && <a href={`tel:${profile.phone}`}><Phone size={16} /> {profile.phone}</a>}{profile.facebook_url && <a href={profile.facebook_url} target="_blank" rel="noreferrer"><Link2 size={16} /> Facebook <ArrowUpRight size={15} /></a>}{profile.linkedin_url && <a href={profile.linkedin_url} target="_blank" rel="noreferrer"><Link2 size={16} /> Perfil profesional <ArrowUpRight size={15} /></a>}{profile.instagram_url && <a href={profile.instagram_url} target="_blank" rel="noreferrer"><AtSign size={16} /> Instagram <ArrowUpRight size={15} /></a>}</div></section>
+        <section className="section-card profile-about"><ProfileGallery profile={profile} /><span className="section-label">SOBRE MÍ</span><h2>Mi historia</h2><p>{profile.bio || "Aún no has agregado una descripción."}</p><div className="profile-detail-list">{profileHobbies(profile).map((hobby) => <span key={hobby}><Heart size={15} /> {hobby}</span>)}{profile.address && <span><MapPin size={15} /> {profile.address}</span>}{profile.stretching && <span><Sparkles size={15} /> Estiramiento: {profile.stretching}</span>}</div><div className="profile-social-links">{profile.phone && <a href={`tel:${profile.phone}`}><Phone size={16} /> {profile.phone}</a>}{profile.facebook_url && <a href={profile.facebook_url} target="_blank" rel="noreferrer"><Link2 size={16} /> Facebook <ArrowUpRight size={15} /></a>}{profile.linkedin_url && <a href={profile.linkedin_url} target="_blank" rel="noreferrer"><Link2 size={16} /> Perfil profesional <ArrowUpRight size={15} /></a>}{profile.instagram_url && <a href={profile.instagram_url} target="_blank" rel="noreferrer"><AtSign size={16} /> Instagram <ArrowUpRight size={15} /></a>}</div></section>
         <section className="section-card profile-links"><span className="section-label">CONEXIONES</span><h2>Mis vínculos</h2>{mentor && <ConnectionListItem label="Me enroló" profile={mentor} onClick={() => onOpen(mentor)} />}{enrolled.map((person) => <ConnectionListItem key={person.id} label="Enrolado por mí" profile={person} onClick={() => onOpen(person)} />)}{personalRelationships.map((relationship) => <ConnectionListItem key={`relationship-${relationship.id}`} label={relationship.label} profile={relationship.profile} onClick={() => onOpen(relationship.profile)} />)}{!mentor && !enrolled.length && !personalRelationships.length && <p className="muted-copy">Todavía no has agregado relaciones.</p>}</section>
       </div>
       {onDeleteRequest && <section className="account-danger-zone"><div><span className="section-label">CUENTA</span><h2>Eliminar mi cuenta</h2><p>Esta acción elimina permanentemente tu perfil, tus datos públicos y tu acceso a Nexo.</p></div><button type="button" onClick={onDeleteRequest}><Trash2 size={17} /> Eliminar cuenta</button></section>}
@@ -1962,12 +2077,13 @@ function ProfilePanel({ profile, profiles, relationships, isOwn, onClose, onOpen
     <div className="overlay" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}>
       <aside className="profile-panel" role="dialog" aria-modal="true" aria-label={`Perfil de ${profile.full_name}`}>
         <button className="close-button" onClick={onClose} aria-label="Cerrar perfil"><X /></button>
-        <div className="panel-hero"><CoverMedia profile={profile} /><Avatar profile={profile} size="hero" /></div>
+        <div className="panel-hero"><CoverMedia profile={profile} /><ClickableProfilePhoto profile={profile} size="hero" /></div>
         <div className="panel-body">
           <span className="cohort-pill">{profile.cohort}</span>
           <h2>{profile.full_name}</h2>
           <p className="panel-role">{profile.profession ?? "Miembro de la comunidad"}</p>
           <div className="panel-meta">{profile.city && <span><MapPin /> {profile.city}, {profile.country}</span>}<span><CalendarDays /> {formatBirthDate(profile.birth_date)}</span></div>
+          <ProfileGallery profile={profile} />
           <div className="panel-about"><span className="section-label">SU HISTORIA</span><p>{profile.bio || "Esta persona todavía no ha compartido su descripción."}</p><div className="profile-detail-list">{profileHobbies(profile).map((hobby) => <span key={hobby}><Heart size={15} /> {hobby}</span>)}{profile.address && <span><MapPin size={15} /> {profile.address}</span>}{profile.stretching && <span><Sparkles size={15} /> Estiramiento: {profile.stretching}</span>}</div></div>
           {profile.phone && <a className="panel-link" href={`tel:${profile.phone}`}><Phone size={16} /> {profile.phone}</a>}
           {profile.facebook_url && <a className="panel-link" href={profile.facebook_url} target="_blank" rel="noreferrer"><Link2 size={16} /> Ver Facebook <ArrowUpRight size={15} /></a>}
@@ -2089,6 +2205,45 @@ function ProfileCoverEditor({ profile, draft, update }: { profile: Profile; draf
       </div>
       <PhotoLinkGuide subject="portada" />
       {adjusting && <ImageAdjustmentDialog kind="cover" profile={previewProfile} draft={draft} update={update} onClose={() => setAdjusting(false)} />}
+    </div>
+  );
+}
+
+function ProfileGalleryEditor({ draft, update }: { draft: ProfileDraft; update: DraftUpdater }) {
+  const [newUrl, setNewUrl] = useState("");
+  const [message, setMessage] = useState<string | null>(null);
+  const gallery = normalizeGalleryUrls(draft.gallery_urls);
+  const addImage = () => {
+    const nextImage = normalizeGalleryUrls([newUrl])[0];
+    if (!nextImage) {
+      setMessage("Usa un enlace público que empiece con http:// o https://.");
+      return;
+    }
+    update("gallery_urls", normalizeGalleryUrls([...gallery, nextImage]));
+    setMessage(null);
+    setNewUrl("");
+  };
+  const removeImage = (url: string) => {
+    update("gallery_urls", gallery.filter((image) => image !== url));
+    setMessage(null);
+  };
+
+  return (
+    <div className="gallery-editor-block">
+      <div className="gallery-editor-heading"><div><ImageIcon size={17} /><span>Galería de fotos</span></div><small>{gallery.length}/{PROFILE_GALLERY_LIMIT}</small></div>
+      <p>Agrega enlaces públicos; las imágenes aparecerán en miniatura antes de tu historia.</p>
+      <div className="gallery-editor-input">
+        <input type="url" value={newUrl} onChange={(event) => { setNewUrl(event.target.value); setMessage(null); }} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addImage(); } }} placeholder="https://drive.google.com/file/d/…" disabled={gallery.length >= PROFILE_GALLERY_LIMIT} aria-invalid={Boolean(message)} />
+        <button type="button" onClick={addImage} disabled={!newUrl.trim() || gallery.length >= PROFILE_GALLERY_LIMIT}><Plus size={15} /> Agregar</button>
+      </div>
+      {message && <span className="gallery-editor-message">{message}</span>}
+      {gallery.length > 0 && <div className="gallery-editor-thumbnails">{gallery.map((url, index) => <div key={url}>
+        {/* Profile gallery images are user-provided remote URLs. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={url} alt={`Vista previa ${index + 1}`} />
+        <button type="button" onClick={() => removeImage(url)} aria-label={`Quitar foto ${index + 1}`}><X size={13} /></button>
+      </div>)}</div>}
+      <PhotoLinkGuide subject="foto" />
     </div>
   );
 }
@@ -2459,6 +2614,7 @@ function ProfileEditor({ profile, profiles, onClose, onSave }: { profile: Profil
         <form onSubmit={submit}>
           <ProfilePhotoEditor profile={profile} draft={draft} update={update} />
           <ProfileCoverEditor profile={profile} draft={draft} update={update} />
+          <ProfileGalleryEditor draft={draft} update={update} />
           <div className="form-grid">
             <Field label="Nombre completo" required><input value={draft.full_name} onChange={(event) => update("full_name", event.target.value)} placeholder="Tu nombre y apellido" /></Field>
             <Field label="Promoción" required><CohortInput value={draft.cohort} onChange={(value) => update("cohort", value)} /></Field>
