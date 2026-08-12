@@ -61,7 +61,7 @@ import {
 
 type View = "home" | "directory" | "connections" | "profile";
 
-const APP_VERSION = "1.0.33";
+const APP_VERSION = "1.0.34";
 const EASTER_EGG_EVENT = "nexo:val-easter-egg";
 
 const valParticles = Array.from({ length: 18 }, (_, index) => ({
@@ -118,6 +118,7 @@ const HOBBY_OPTIONS = [
 ] as const;
 
 const PROFILE_HOBBY_LIMIT = 12;
+const HOBBY_OPTION_PREVIEW_COUNT = 12;
 const PROFILE_GALLERY_LIMIT = 8;
 
 function normalizeHobbies(values: readonly string[]) {
@@ -134,6 +135,19 @@ function normalizeHobbies(values: readonly string[]) {
 function profileHobbies(profile: Pick<Profile, "hobbies" | "hobbies_list">) {
   if (profile.hobbies_list !== null && profile.hobbies_list !== undefined) return normalizeHobbies(profile.hobbies_list);
   return normalizeHobbies((profile.hobbies ?? "").split(/[,;\n]+/));
+}
+
+function communityCustomHobbyOptions(profiles: readonly Profile[]) {
+  const options = new Map<string, string>();
+
+  profiles.forEach((profile) => {
+    profileHobbies(profile).forEach((hobby) => {
+      const isStandardOption = HOBBY_OPTIONS.some((option) => option.localeCompare(hobby, "es", { sensitivity: "base" }) === 0);
+      if (!isStandardOption) options.set(hobby.toLocaleLowerCase("es"), hobby);
+    });
+  });
+
+  return Array.from(options.values()).sort((first, second) => first.localeCompare(second, "es", { sensitivity: "base" }));
 }
 
 export type Profile = {
@@ -1543,6 +1557,11 @@ type CohortFocusTarget = {
   worldTop: number;
 };
 
+type CohortMemberPosition = {
+  column: number;
+  row: number;
+};
+
 type ElementBox = {
   x: number;
   y: number;
@@ -1563,6 +1582,31 @@ function getElementBox(element: HTMLElement, ancestor: HTMLElement): ElementBox 
 
   if (current !== ancestor) return null;
   return { x, y, width: element.offsetWidth, height: element.offsetHeight };
+}
+
+function buildAlternatingMemberPositions(memberCount: number): CohortMemberPosition[] {
+  const totalColumns = 26;
+  const positions: CohortMemberPosition[] = [];
+  let memberIndex = 0;
+  let rowIndex = 0;
+
+  while (memberIndex < memberCount) {
+    const rowCapacity = rowIndex % 2 === 0 ? 12 : 13;
+    const membersInRow = Math.min(rowCapacity, memberCount - memberIndex);
+    const firstColumn = (totalColumns - membersInRow * 2) / 2 + 1;
+
+    for (let columnIndex = 0; columnIndex < membersInRow; columnIndex += 1) {
+      positions.push({
+        column: firstColumn + columnIndex * 2,
+        row: rowIndex + 1,
+      });
+    }
+
+    memberIndex += membersInRow;
+    rowIndex += 1;
+  }
+
+  return positions;
 }
 
 function buildCohortGroups(profiles: Profile[]): CohortGroup[] {
@@ -1840,6 +1884,7 @@ function CohortGalaxy({
           {groups.map((group, groupIndex) => {
             const selected = selectedCohort === group.cohort;
             const dimmed = selectedCohort !== null && !selected;
+            const memberPositions = buildAlternatingMemberPositions(group.members.length);
             return (
               <section
                 key={group.cohort}
@@ -1860,7 +1905,11 @@ function CohortGalaxy({
                       className={`cohort-stack-member ${hoveredProfileId === member.id ? "is-active" : ""} ${relatedProfileIds.has(member.id) && hoveredProfileId !== member.id ? "is-connected" : ""}`}
                       key={member.id}
                       ref={(node) => { if (node) memberRefs.current.set(member.id, node); else memberRefs.current.delete(member.id); }}
-                      style={{ "--member-delay": `${groupIndex * -0.35 - memberIndex * 0.08}s` } as CSSProperties}
+                      style={{
+                        "--member-column": memberPositions[memberIndex].column,
+                        "--member-delay": `${groupIndex * -0.35 - memberIndex * 0.08}s`,
+                        "--member-row": memberPositions[memberIndex].row,
+                      } as CSSProperties}
                       type="button"
                       title={groupMode === "hobbies" ? `${member.full_name} · ${group.cohort}` : member.enrolled_by_id && profileById.get(member.enrolled_by_id) ? `${profileById.get(member.enrolled_by_id)?.full_name} enroló a ${member.full_name}` : `${member.full_name} · inicio de esta rama`}
                       onMouseEnter={() => setHoveredProfileId(member.id)}
@@ -1910,7 +1959,7 @@ function Connections({ profile, profiles, relationships, onOpen, onAdd }: { prof
     setSelectedCohort(null);
     resetView();
   };
-  const adjustZoom = (amount: number) => setZoom((current) => Math.min(1.35, Math.max(0.55, current + amount)));
+  const adjustZoom = (amount: number) => setZoom((current) => Math.min(1.6, Math.max(0.4, current + amount)));
   const centerCohort = useCallback((target: CohortFocusTarget) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -1963,8 +2012,6 @@ function Connections({ profile, profiles, relationships, onOpen, onAdd }: { prof
 
         <header className="living-header">
           <div>
-            <span className="living-kicker"><Sparkles size={13} /> {networkMode === "lineage" ? "TUS VÍNCULOS" : networkMode === "cohorts" ? "NUESTRA COMUNIDAD" : networkMode === "my_hobbies" ? "TUS INTERESES EN COMÚN" : "INTERESES EN COMÚN"}</span>
-            <h1>{networkMode === "lineage" ? <>Tu red está <em>viva.</em></> : networkMode === "cohorts" ? <><em>{profiles.length} personas</em>, {cohortGroups.length} promociones.</> : networkMode === "my_hobbies" ? <><em>{sharedHobbyProfiles.length} personas</em> comparten tus hobbies.</> : <><em>{hobbyGroups.length} hobbies</em> conectan a la comunidad.</>}</h1>
             <p>{networkMode === "lineage" ? "Explora tus vínculos de familia, amistad, pareja y enrolamiento." : networkMode === "cohorts" ? "Cada pareja de personas tiene una sola línea; la flecha indica el enrolamiento." : networkMode === "my_hobbies" ? "Aquí solo aparecen personas con al menos un hobby en común contigo." : "Descubre personas por intereses compartidos y encuentra nuevos puntos en común."}</p>
             <div className="network-mode-switch" role="group" aria-label="Agrupar conexiones">
               <button type="button" className={networkMode === "lineage" ? "active" : ""} onClick={() => changeMode("lineage")}><Network size={14} /> Mis vínculos</button>
@@ -2160,11 +2207,19 @@ function StretchingSelect({ value, onChange }: { value?: string | null; onChange
   );
 }
 
-function HobbySelector({ value, legacyValue, onChange }: { value?: string[] | null; legacyValue?: string | null; onChange: (value: string[]) => void }) {
+function HobbySelector({ value, legacyValue, profiles, onChange }: { value?: string[] | null; legacyValue?: string | null; profiles: Profile[]; onChange: (value: string[]) => void }) {
   const [customHobby, setCustomHobby] = useState("");
+  const [showAllHobbies, setShowAllHobbies] = useState(false);
   const selected = normalizeHobbies(value ?? (legacyValue ?? "").split(/[,;\n]+/));
   const selectedKeys = new Set(selected.map((hobby) => hobby.toLocaleLowerCase("es")));
   const atLimit = selected.length >= PROFILE_HOBBY_LIMIT;
+  const communityOptions = useMemo(() => communityCustomHobbyOptions(profiles), [profiles]);
+  const communityKeys = new Set(communityOptions.map((hobby) => hobby.toLocaleLowerCase("es")));
+  const previewOptions = HOBBY_OPTIONS.slice(0, HOBBY_OPTION_PREVIEW_COUNT);
+  const previewKeys = new Set(previewOptions.map((hobby) => hobby.toLocaleLowerCase("es")));
+  const selectedStandardOptions = HOBBY_OPTIONS.filter((hobby) => selectedKeys.has(hobby.toLocaleLowerCase("es")) && !previewKeys.has(hobby.toLocaleLowerCase("es")));
+  const visibleStandardOptions = showAllHobbies ? HOBBY_OPTIONS : [...previewOptions, ...selectedStandardOptions];
+  const hiddenOptionCount = HOBBY_OPTIONS.length - visibleStandardOptions.length + communityOptions.length;
 
   const toggleHobby = (hobby: string) => {
     const key = hobby.toLocaleLowerCase("es");
@@ -2177,16 +2232,25 @@ function HobbySelector({ value, legacyValue, onChange }: { value?: string[] | nu
     setCustomHobby("");
   };
   const customSelections = selected.filter((hobby) => !HOBBY_OPTIONS.some((option) => option.localeCompare(hobby, "es", { sensitivity: "base" }) === 0));
+  const customSelectionChips = customSelections.filter((hobby) => !showAllHobbies || !communityKeys.has(hobby.toLocaleLowerCase("es")));
+
+  const renderHobbyOption = (hobby: string) => {
+    const active = selectedKeys.has(hobby.toLocaleLowerCase("es"));
+    return <button key={hobby} type="button" className={active ? "active" : ""} aria-pressed={active} disabled={!active && atLimit} onClick={() => toggleHobby(hobby)}>{active ? <Check size={13} /> : <Plus size={13} />}{hobby}</button>;
+  };
 
   return (
     <div className="hobby-selector">
       <div className="hobby-option-grid">
-        {HOBBY_OPTIONS.map((hobby) => {
-          const active = selectedKeys.has(hobby.toLocaleLowerCase("es"));
-          return <button key={hobby} type="button" className={active ? "active" : ""} aria-pressed={active} disabled={!active && atLimit} onClick={() => toggleHobby(hobby)}>{active ? <Check size={13} /> : <Plus size={13} />}{hobby}</button>;
-        })}
+        {visibleStandardOptions.map(renderHobbyOption)}
+        {showAllHobbies && communityOptions.length > 0 && <div className="hobby-community-label"><span>Otros de la comunidad</span><small>Agregados por otras personas</small></div>}
+        {showAllHobbies && communityOptions.map(renderHobbyOption)}
       </div>
-      {customSelections.length > 0 && <div className="custom-hobby-list">{customSelections.map((hobby) => <button key={hobby} type="button" onClick={() => toggleHobby(hobby)}>{hobby}<X size={12} /></button>)}</div>}
+      <button className="hobby-more-toggle" type="button" aria-expanded={showAllHobbies} onClick={() => setShowAllHobbies((current) => !current)}>
+        {showAllHobbies ? "Ver menos" : `Ver más${hiddenOptionCount > 0 ? ` (${hiddenOptionCount})` : ""}`}
+        <ChevronDown size={15} />
+      </button>
+      {customSelectionChips.length > 0 && <div className="custom-hobby-list">{customSelectionChips.map((hobby) => <button key={hobby} type="button" onClick={() => toggleHobby(hobby)}>{hobby}<X size={12} /></button>)}</div>}
       <div className="custom-hobby-input">
         <input value={customHobby} onChange={(event) => setCustomHobby(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addCustomHobby(); } }} maxLength={40} disabled={atLimit} placeholder="Agregar otro hobby…" />
         <button type="button" onClick={addCustomHobby} disabled={atLimit || !customHobby.trim()}><Plus size={15} /> Agregar</button>
@@ -2607,7 +2671,7 @@ function ProfileOnboarding({
               <Field label="Ciudad"><input value={draft.city ?? ""} onChange={(event) => update("city", event.target.value)} placeholder="Lima" /></Field>
               <Field label="País"><input value={draft.country ?? ""} onChange={(event) => update("country", event.target.value)} placeholder="Perú" /></Field>
               <Field label="Dirección o zona"><input value={draft.address ?? ""} onChange={(event) => update("address", event.target.value)} placeholder="Miraflores, Lima" /><small>Comparte solo una referencia que quieras hacer pública.</small></Field>
-              <div className="field field-wide"><span>Hobbies e intereses</span><HobbySelector value={draft.hobbies_list} legacyValue={draft.hobbies} onChange={(value) => update("hobbies_list", value)} /></div>
+              <div className="field field-wide"><span>Hobbies e intereses</span><HobbySelector value={draft.hobbies_list} legacyValue={draft.hobbies} profiles={profiles} onChange={(value) => update("hobbies_list", value)} /></div>
               <Field label="Tu descripción" wide><textarea rows={5} maxLength={320} value={draft.bio ?? ""} onChange={(event) => update("bio", event.target.value)} placeholder="Cuéntanos brevemente quién eres, qué haces y qué te inspira." /><small>{draft.bio?.length ?? 0}/320</small></Field>
             </div></div>}
 
@@ -2660,7 +2724,7 @@ function ProfileEditor({ profile, profiles, onClose, onSave }: { profile: Profil
             <Field label="Ciudad"><input value={draft.city ?? ""} onChange={(event) => update("city", event.target.value)} placeholder="Lima" /></Field>
             <Field label="País"><input value={draft.country ?? ""} onChange={(event) => update("country", event.target.value)} placeholder="Perú" /></Field>
             <Field label="Dirección o zona"><input value={draft.address ?? ""} onChange={(event) => update("address", event.target.value)} placeholder="Miraflores, Lima" /></Field>
-            <div className="field field-wide"><span>Hobbies e intereses</span><HobbySelector value={draft.hobbies_list} legacyValue={draft.hobbies} onChange={(value) => update("hobbies_list", value)} /></div>
+            <div className="field field-wide"><span>Hobbies e intereses</span><HobbySelector value={draft.hobbies_list} legacyValue={draft.hobbies} profiles={profiles} onChange={(value) => update("hobbies_list", value)} /></div>
             <div className="field field-wide"><span>¿Quién te enroló?</span><ProfilePicker profiles={profiles} profileId={profile.id} value={draft.enrolled_by_id} onChange={(value) => update("enrolled_by_id", value)} /></div>
             <Field label="Número de teléfono"><input type="tel" inputMode="tel" value={draft.phone ?? ""} onChange={(event) => update("phone", event.target.value)} placeholder="+51 999 999 999" /></Field>
             <Field label="Facebook"><input value={draft.facebook_url ?? ""} onChange={(event) => update("facebook_url", event.target.value)} placeholder="facebook.com/tu.perfil" /></Field>
