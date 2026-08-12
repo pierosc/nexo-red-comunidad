@@ -269,6 +269,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .theme-dark .photo-field,.theme-dark .cover-field,.theme-dark .gallery-editor-block { background:#1b2e38; }
 .theme-dark .photo-link-guide { background:#172a34; }.theme-dark .photo-link-guide p { color:#b9cbc0; }
 .theme-dark .photo-field input,.theme-dark .cover-field input,.theme-dark .gallery-editor-input input,.theme-dark .field input,.theme-dark .field textarea,.theme-dark .field select,.theme-dark .instagram-handle-input,.theme-dark .profile-picker-trigger,.theme-dark .profile-picker-popover { background:#10212b; color:var(--ink); }
+.theme-dark .gallery-editor-input button { background:var(--coral); color:#fff; }.theme-dark .gallery-editor-input button:disabled { background:#334b57; border:1px solid #49616c; color:#c4d0d4; opacity:1; }
 .theme-dark .picker-option:hover,.theme-dark .picker-option.selected { background:#203641; }
 .theme-dark .close-button { background:rgba(24,44,55,.94); border-color:#40545d; color:#fff; }
 .theme-dark .map-caption { background:#1b303a; }.theme-dark .error-banner { background:#402722; border-color:#6b3b31; color:#ffb9a8; }

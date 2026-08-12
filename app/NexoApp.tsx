@@ -61,7 +61,7 @@ import {
 
 type View = "home" | "directory" | "connections" | "profile";
 
-const APP_VERSION = "1.0.32";
+const APP_VERSION = "1.0.33";
 const EASTER_EGG_EVENT = "nexo:val-easter-egg";
 
 const valParticles = Array.from({ length: 18 }, (_, index) => ({
@@ -460,7 +460,7 @@ function ProfileImageDialog({ profile, images, initialIndex, onClose }: { profil
   }, [images.length, onClose]);
 
   const startSwipe = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!hasMultipleImages) return;
+    if (!hasMultipleImages || (event.target as Element).closest("button")) return;
     swipeStart.current = { pointerId: event.pointerId, x: event.clientX };
     event.currentTarget.setPointerCapture(event.pointerId);
   };

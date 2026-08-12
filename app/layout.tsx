@@ -23,6 +23,9 @@ export async function generateMetadata(): Promise<Metadata> {
     title: "Nexo — Personas, historias y conexiones",
     description:
       "Una red privada para descubrir perfiles, promociones y conexiones de enrolamiento.",
+    icons: {
+      icon: [{ url: "/favicon.svg", type: "image/svg+xml" }],
+    },
     openGraph: {
       title: "Nexo",
       description: "Personas. Historias. Conexiones.",
