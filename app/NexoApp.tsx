@@ -19,6 +19,7 @@ import {
   Camera,
   Check,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   CircleUserRound,
   Eye,
@@ -60,7 +61,7 @@ import {
 
 type View = "home" | "directory" | "connections" | "profile";
 
-const APP_VERSION = "1.0.31";
+const APP_VERSION = "1.0.32";
 const EASTER_EGG_EVENT = "nexo:val-easter-egg";
 
 const valParticles = Array.from({ length: 18 }, (_, index) => ({
@@ -340,6 +341,12 @@ function normalizeGalleryUrls(values?: readonly string[] | null) {
   return Array.from(normalized.values()).slice(0, PROFILE_GALLERY_LIMIT);
 }
 
+function profileImages(profile: Pick<Profile, "photo_url" | "gallery_urls">) {
+  const mainPhoto = normalizePhotoUrl(profile.photo_url);
+  const gallery = normalizeGalleryUrls(profile.gallery_urls).filter((url) => url !== mainPhoto);
+  return mainPhoto ? [mainPhoto, ...gallery] : gallery;
+}
+
 function instagramHandle(value?: string | null) {
   if (!value) return "";
   return value
@@ -435,23 +442,51 @@ function Avatar({ profile, size = "medium" }: { profile: Profile; size?: "small"
   );
 }
 
-function ProfileImageDialog({ profile, imageUrl, onClose }: { profile: Profile; imageUrl: string; onClose: () => void }) {
+function ProfileImageDialog({ profile, images, initialIndex, onClose }: { profile: Profile; images: string[]; initialIndex: number; onClose: () => void }) {
+  const [currentIndex, setCurrentIndex] = useState(() => Math.min(Math.max(initialIndex, 0), images.length - 1));
+  const swipeStart = useRef<{ pointerId: number; x: number } | null>(null);
+  const hasMultipleImages = images.length > 1;
+  const showPrevious = () => setCurrentIndex((index) => (index - 1 + images.length) % images.length);
+  const showNext = () => setCurrentIndex((index) => (index + 1) % images.length);
+
   useEffect(() => {
-    const closeOnEscape = (event: KeyboardEvent) => {
+    const navigateWithKeyboard = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
+      if (images.length > 1 && event.key === "ArrowLeft") setCurrentIndex((index) => (index - 1 + images.length) % images.length);
+      if (images.length > 1 && event.key === "ArrowRight") setCurrentIndex((index) => (index + 1) % images.length);
     };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [onClose]);
+    window.addEventListener("keydown", navigateWithKeyboard);
+    return () => window.removeEventListener("keydown", navigateWithKeyboard);
+  }, [images.length, onClose]);
+
+  const startSwipe = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!hasMultipleImages) return;
+    swipeStart.current = { pointerId: event.pointerId, x: event.clientX };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+  const finishSwipe = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const start = swipeStart.current;
+    swipeStart.current = null;
+    if (!start || start.pointerId !== event.pointerId) return;
+    const distance = event.clientX - start.x;
+    if (Math.abs(distance) < 45) return;
+    if (distance > 0) showPrevious(); else showNext();
+  };
 
   return (
     <div className="profile-image-overlay" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}>
       <section className="profile-image-dialog" role="dialog" aria-modal="true" aria-label={`Foto ampliada de ${profile.full_name}`}>
         <button className="close-button" type="button" onClick={onClose} aria-label="Cerrar foto ampliada"><X /></button>
-        {/* Profile images are user-provided remote URLs. */}
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={imageUrl} alt={`Foto de ${profile.full_name}`} />
-        <footer><strong>{profile.full_name}</strong><span>{profile.cohort}</span></footer>
+        <div className="profile-image-stage" onPointerDown={startSwipe} onPointerUp={finishSwipe} onPointerCancel={() => { swipeStart.current = null; }}>
+          {/* Profile images are user-provided remote URLs. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img key={images[currentIndex]} src={images[currentIndex]} alt={`Foto ${currentIndex + 1} de ${profile.full_name}`} draggable={false} />
+          {hasMultipleImages && <>
+            <button className="profile-image-arrow profile-image-arrow-previous" type="button" onClick={showPrevious} aria-label="Ver foto anterior"><ChevronLeft /></button>
+            <button className="profile-image-arrow profile-image-arrow-next" type="button" onClick={showNext} aria-label="Ver foto siguiente"><ChevronRight /></button>
+          </>}
+        </div>
+        <footer><strong>{profile.full_name}</strong><span>{hasMultipleImages ? `${profile.cohort} · ${currentIndex + 1} de ${images.length}` : profile.cohort}</span></footer>
       </section>
     </div>
   );
@@ -459,6 +494,7 @@ function ProfileImageDialog({ profile, imageUrl, onClose }: { profile: Profile; 
 
 function ClickableProfilePhoto({ profile, size = "hero" }: { profile: Profile; size?: "large" | "hero" }) {
   const photoUrl = normalizePhotoUrl(profile.photo_url);
+  const images = profileImages(profile);
   const [open, setOpen] = useState(false);
 
   if (!photoUrl) return <Avatar profile={profile} size={size} />;
@@ -468,14 +504,15 @@ function ClickableProfilePhoto({ profile, size = "hero" }: { profile: Profile; s
         <Avatar profile={profile} size={size} />
         <span className="profile-photo-zoom"><Eye size={14} /></span>
       </button>
-      {open && <ProfileImageDialog profile={profile} imageUrl={photoUrl} onClose={() => setOpen(false)} />}
+      {open && <ProfileImageDialog profile={profile} images={images} initialIndex={0} onClose={() => setOpen(false)} />}
     </>
   );
 }
 
 function ProfileGallery({ profile }: { profile: Profile }) {
   const images = normalizeGalleryUrls(profile.gallery_urls);
-  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const allImages = profileImages(profile);
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   if (!images.length) return null;
 
   return (
@@ -484,7 +521,7 @@ function ProfileGallery({ profile }: { profile: Profile }) {
         <span className="section-label">FOTOS</span>
         <div>
           {images.map((url, index) => (
-            <button key={url} type="button" onClick={() => setSelectedImage(url)} aria-label={`Ampliar foto ${index + 1} de ${profile.full_name}`}>
+            <button key={url} type="button" onClick={() => setSelectedIndex(allImages.indexOf(url))} aria-label={`Ampliar foto ${index + 1} de ${profile.full_name}`}>
               {/* Profile gallery images are user-provided remote URLs. */}
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={url} alt="" loading="lazy" />
@@ -493,7 +530,7 @@ function ProfileGallery({ profile }: { profile: Profile }) {
           ))}
         </div>
       </div>
-      {selectedImage && <ProfileImageDialog profile={profile} imageUrl={selectedImage} onClose={() => setSelectedImage(null)} />}
+      {selectedIndex !== null && <ProfileImageDialog profile={profile} images={allImages} initialIndex={selectedIndex} onClose={() => setSelectedIndex(null)} />}
     </>
   );
 }
