@@ -120,6 +120,79 @@ export type Profile = {
   updated_at: string;
 };
 
+const RELATIONSHIP_OPTIONS = [
+  { value: "spouse", label: "Esposo/a" },
+  { value: "partner", label: "Pareja" },
+  { value: "parent", label: "Padre / madre" },
+  { value: "child", label: "Hijo/a" },
+  { value: "sibling", label: "Hermano/a" },
+  { value: "friend", label: "Amigo/a" },
+  { value: "classmate", label: "Compañero/a de promoción" },
+  { value: "colleague", label: "Colega de trabajo" },
+  { value: "mentor", label: "Mentor/a" },
+  { value: "mentee", label: "Persona mentoreada" },
+  { value: "relative", label: "Otro familiar" },
+  { value: "other", label: "Otro" },
+] as const;
+
+type RelationshipType = (typeof RELATIONSHIP_OPTIONS)[number]["value"];
+type ConnectionType = "i_enrolled" | "enrolled_me" | RelationshipType;
+
+export type ProfileRelationship = {
+  id: string;
+  profile_id: string;
+  related_profile_id: string;
+  relationship_type: RelationshipType;
+  custom_label: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type RelationshipView = {
+  id: string;
+  profile: Profile;
+  label: string;
+};
+
+function relationshipLabel(relationship: ProfileRelationship, incoming: boolean) {
+  if (relationship.relationship_type === "other") return relationship.custom_label?.trim() || "Otra relación";
+
+  const labels: Record<Exclude<RelationshipType, "other">, [string, string]> = {
+    spouse: ["Esposo/a", "Esposo/a"],
+    partner: ["Pareja", "Pareja"],
+    parent: ["Padre / madre", "Hijo/a"],
+    child: ["Hijo/a", "Padre / madre"],
+    sibling: ["Hermano/a", "Hermano/a"],
+    friend: ["Amigo/a", "Amigo/a"],
+    classmate: ["Compañero/a de promoción", "Compañero/a de promoción"],
+    colleague: ["Colega de trabajo", "Colega de trabajo"],
+    mentor: ["Mentor/a", "Persona mentoreada"],
+    mentee: ["Persona mentoreada", "Mentor/a"],
+    relative: ["Familiar", "Familiar"],
+  };
+  return labels[relationship.relationship_type][incoming ? 1 : 0];
+}
+
+function relationshipsForProfile(profileId: string, profiles: Profile[], relationships: ProfileRelationship[]): RelationshipView[] {
+  const profileById = new Map(profiles.map((profile) => [profile.id, profile]));
+  const grouped = new Map<string, RelationshipView>();
+  relationships.forEach((relationship) => {
+    const outgoing = relationship.profile_id === profileId;
+    const incoming = relationship.related_profile_id === profileId;
+    if (!outgoing && !incoming) return;
+    const relatedProfile = profileById.get(outgoing ? relationship.related_profile_id : relationship.profile_id);
+    if (!relatedProfile) return;
+    const label = relationshipLabel(relationship, incoming);
+    const existing = grouped.get(relatedProfile.id);
+    if (!existing) {
+      grouped.set(relatedProfile.id, { id: relationship.id, profile: relatedProfile, label });
+    } else if (!existing.label.split(" · ").includes(label)) {
+      existing.label = `${existing.label} · ${label}`;
+    }
+  });
+  return Array.from(grouped.values());
+}
+
 type ProfileDraft = Pick<
   Profile,
   | "full_name"
@@ -319,6 +392,7 @@ function isExampleProfile(profile: Profile) {
 function useProfiles(userId: string, config: NexoConfig, getToken?: () => Promise<string | null>) {
   const live = Boolean(config.supabaseUrl && config.supabasePublishableKey && getToken);
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [relationships, setRelationships] = useState<ProfileRelationship[]>([]);
   const [loading, setLoading] = useState(live);
   const [error, setError] = useState<string | null>(null);
   const client = useMemo(
@@ -337,7 +411,17 @@ function useProfiles(userId: string, config: NexoConfig, getToken?: () => Promis
       setError("No pudimos cargar el directorio. Revisa la conexión con Supabase.");
     } else if (data) {
       setProfiles((data as Profile[]).filter((profile) => !isExampleProfile(profile)));
-      setError(null);
+      const { data: relationshipData, error: relationshipError } = await client
+        .from("profile_relationships")
+        .select("*")
+        .order("created_at", { ascending: true });
+      if (relationshipError) {
+        setRelationships([]);
+        setError("El directorio cargó, pero las relaciones personales todavía no están disponibles.");
+      } else {
+        setRelationships((relationshipData as ProfileRelationship[]) ?? []);
+        setError(null);
+      }
     }
     setLoading(false);
   }, [client]);
@@ -426,6 +510,56 @@ function useProfiles(userId: string, config: NexoConfig, getToken?: () => Promis
     [client, refresh],
   );
 
+  const saveRelationship = useCallback(
+    async (profileId: string, relatedProfileId: string, relationshipType: RelationshipType, customLabel: string | null) => {
+      const normalizedLabel = relationshipType === "other" ? customLabel?.trim() || null : null;
+      if (!profileId || !relatedProfileId || profileId === relatedProfileId) {
+        throw new Error("La relación seleccionada no es válida.");
+      }
+      if (relationshipType === "other" && (!normalizedLabel || normalizedLabel.length > 60)) {
+        throw new Error("Escribe un nombre válido para la relación.");
+      }
+
+      if (client) {
+        const { error: relationshipError } = await client
+          .from("profile_relationships")
+          .upsert({
+            profile_id: profileId,
+            related_profile_id: relatedProfileId,
+            relationship_type: relationshipType,
+            custom_label: normalizedLabel,
+          }, { onConflict: "profile_id,related_profile_id,relationship_type" });
+        if (relationshipError) throw relationshipError;
+        await refresh();
+        return;
+      }
+
+      const now = new Date().toISOString();
+      setRelationships((previous) => {
+        const existing = previous.find((relationship) => (
+          relationship.profile_id === profileId
+          && relationship.related_profile_id === relatedProfileId
+          && relationship.relationship_type === relationshipType
+        ));
+        if (existing) {
+          return previous.map((relationship) => relationship.id === existing.id
+            ? { ...relationship, custom_label: normalizedLabel, updated_at: now }
+            : relationship);
+        }
+        return [...previous, {
+          id: crypto.randomUUID(),
+          profile_id: profileId,
+          related_profile_id: relatedProfileId,
+          relationship_type: relationshipType,
+          custom_label: normalizedLabel,
+          created_at: now,
+          updated_at: now,
+        }];
+      });
+    },
+    [client, refresh],
+  );
+
   const deleteProfile = useCallback(async () => {
     if (client) {
       const { error: deleteError } = await client
@@ -437,7 +571,7 @@ function useProfiles(userId: string, config: NexoConfig, getToken?: () => Promis
     setProfiles((previous) => previous.filter((profile) => profile.clerk_user_id !== userId));
   }, [client, userId]);
 
-  return { profiles, loading, error, live, saveProfile, saveConnection, deleteProfile };
+  return { profiles, relationships, loading, error, live, saveProfile, saveConnection, saveRelationship, deleteProfile };
 }
 
 export default function NexoApp({ config }: { config: NexoConfig }) {
@@ -635,7 +769,7 @@ function Workspace({
   accountControl: React.ReactNode;
   onDeleteAccount?: () => Promise<void>;
 }) {
-  const { profiles, loading, error, live, saveProfile, saveConnection, deleteProfile } = useProfiles(userId, config, getToken);
+  const { profiles, relationships, loading, error, live, saveProfile, saveConnection, saveRelationship, deleteProfile } = useProfiles(userId, config, getToken);
   const [view, setView] = useState<View>("home");
   const [query, setQuery] = useState("");
   const [cohort, setCohort] = useState("Todas");
@@ -779,6 +913,7 @@ function Workspace({
             <Dashboard
               profile={displayProfile}
               profiles={profiles}
+              relationships={relationships}
               loading={loading}
               onOpen={setSelected}
               onDirectory={() => setView("directory")}
@@ -788,9 +923,9 @@ function Workspace({
           {view === "directory" && (
             <Directory profiles={filtered} cohorts={cohorts} cohort={cohort} query={query} onQuery={setQuery} onCohort={setCohort} onOpen={setSelected} />
           )}
-          {view === "connections" && <Connections profile={displayProfile} profiles={profiles} onOpen={setSelected} onAdd={() => setAddingConnection(true)} />}
+          {view === "connections" && <Connections profile={displayProfile} profiles={profiles} relationships={relationships} onOpen={setSelected} onAdd={() => setAddingConnection(true)} />}
           {view === "profile" && (
-            <MyProfile profile={displayProfile} profiles={profiles} onEdit={() => setEditing(true)} onOpen={setSelected} onDeleteRequest={onDeleteAccount ? () => setDeletingAccount(true) : undefined} />
+            <MyProfile profile={displayProfile} profiles={profiles} relationships={relationships} onEdit={() => setEditing(true)} onOpen={setSelected} onDeleteRequest={onDeleteAccount ? () => setDeletingAccount(true) : undefined} />
           )}
         </main>
       </div>
@@ -799,6 +934,7 @@ function Workspace({
         <ProfilePanel
           profile={selected}
           profiles={profiles}
+          relationships={relationships}
           isOwn={selected.clerk_user_id === userId}
           onClose={() => setSelected(null)}
           onOpen={setSelected}
@@ -818,8 +954,14 @@ function Workspace({
           profile={displayProfile}
           profiles={profiles}
           onClose={() => setAddingConnection(false)}
-          onSave={async (enrollerId, enrolleeId) => {
-            await saveConnection(enrollerId, enrolleeId);
+          onSave={async (personId, connectionType, customLabel) => {
+            if (connectionType === "i_enrolled" || connectionType === "enrolled_me") {
+              const enrollerId = connectionType === "i_enrolled" ? displayProfile.id : personId;
+              const enrolleeId = connectionType === "i_enrolled" ? personId : displayProfile.id;
+              await saveConnection(enrollerId, enrolleeId);
+            } else {
+              await saveRelationship(displayProfile.id, personId, connectionType, customLabel);
+            }
             setAddingConnection(false);
           }}
         />
@@ -903,9 +1045,10 @@ function NavButton({ icon, label, active, onClick }: { icon: React.ReactNode; la
   return <button className={active ? "active" : ""} onClick={onClick} type="button">{icon}<span>{label}</span></button>;
 }
 
-function Dashboard({ profile, profiles, loading, onOpen, onDirectory, onConnections }: {
+function Dashboard({ profile, profiles, relationships, loading, onOpen, onDirectory, onConnections }: {
   profile: Profile;
   profiles: Profile[];
+  relationships: ProfileRelationship[];
   loading: boolean;
   onOpen: (profile: Profile) => void;
   onDirectory: () => void;
@@ -913,6 +1056,12 @@ function Dashboard({ profile, profiles, loading, onOpen, onDirectory, onConnecti
 }) {
   const enrolled = profiles.filter((candidate) => candidate.enrolled_by_id === profile.id);
   const mentor = profiles.find((candidate) => candidate.id === profile.enrolled_by_id);
+  const personalRelationships = relationshipsForProfile(profile.id, profiles, relationships);
+  const connectedPeople = new Set([
+    ...personalRelationships.map((relationship) => relationship.profile.id),
+    ...enrolled.map((person) => person.id),
+    ...(mentor ? [mentor.id] : []),
+  ]);
   const recent = profiles.filter((candidate) => candidate.id !== profile.id).slice(0, 4);
   const now = new Date();
   const profilesThisMonth = profiles.filter((candidate) => {
@@ -937,7 +1086,7 @@ function Dashboard({ profile, profiles, loading, onOpen, onDirectory, onConnecti
 
       <section className="stats-grid">
         <article className="stat-card stat-primary"><div className="stat-icon"><Users /></div><span>Personas en la red</span><strong>{loading ? "—" : profiles.length}</strong><small><b>+{profilesThisMonth}</b> este mes</small><div className="stat-decoration">N</div></article>
-        <article className="stat-card"><div className="stat-icon coral"><Network /></div><span>Tus conexiones</span><strong>{enrolled.length + (mentor ? 1 : 0)}</strong><small>{enrolled.length} enroladas por ti</small></article>
+        <article className="stat-card"><div className="stat-icon coral"><Network /></div><span>Tus conexiones</span><strong>{connectedPeople.size}</strong><small>{personalRelationships.length} relaciones personales</small></article>
         <article className="stat-card"><div className="stat-icon sage"><BookOpen /></div><span>Promociones</span><strong>{new Set(profiles.map((item) => item.cohort)).size}</strong><small>{cohortRange}</small></article>
       </section>
 
@@ -1000,7 +1149,7 @@ function Directory({ profiles, cohorts, cohort, query, onQuery, onCohort, onOpen
   );
 }
 
-type NetworkRelation = "self" | "mentor" | "child" | "sibling" | "grandchild";
+type NetworkRelation = "self" | "mentor" | "child" | "sibling" | "grandchild" | "related";
 
 type NetworkPoint = {
   profile: Profile;
@@ -1008,6 +1157,7 @@ type NetworkPoint = {
   x: number;
   y: number;
   delay: number;
+  label?: string;
 };
 
 type NetworkEdge = {
@@ -1016,7 +1166,7 @@ type NetworkEdge = {
   tone: "primary" | "secondary";
 };
 
-function buildLivingNetwork(profile: Profile, profiles: Profile[]) {
+function buildLivingNetwork(profile: Profile, profiles: Profile[], relationships: ProfileRelationship[]) {
   const points: NetworkPoint[] = [{ profile, relation: "self", x: 0, y: 0, delay: 0 }];
   const edges: NetworkEdge[] = [];
   const mentor = profiles.find((person) => person.id === profile.enrolled_by_id);
@@ -1073,7 +1223,33 @@ function buildLivingNetwork(profile: Profile, profiles: Profile[]) {
       });
   });
 
-  return { points, edges, mentor, directChildren };
+  const relationshipPositions = [
+    { x: -500, y: -260 },
+    { x: 500, y: -260 },
+    { x: -560, y: 30 },
+    { x: 560, y: 30 },
+    { x: -510, y: 350 },
+    { x: 510, y: 350 },
+  ];
+  const visibleProfileIds = new Set(points.map((point) => point.profile.id));
+  const personalRelationships = relationshipsForProfile(profile.id, profiles, relationships)
+    .filter((relationship) => !visibleProfileIds.has(relationship.profile.id))
+    .slice(0, relationshipPositions.length);
+  personalRelationships.forEach((relationship, index) => {
+    const position = relationshipPositions[index];
+    const point: NetworkPoint = {
+      profile: relationship.profile,
+      relation: "related",
+      label: relationship.label,
+      x: position.x,
+      y: position.y,
+      delay: index + 7,
+    };
+    points.push(point);
+    edges.push({ from: points[0], to: point, tone: "secondary" });
+  });
+
+  return { points, edges, mentor, directChildren, personalRelationships };
 }
 
 function LivingEdge({ edge, index }: { edge: NetworkEdge; index: number }) {
@@ -1104,6 +1280,7 @@ function LivingNode({ point, onOpen }: { point: NetworkPoint; onOpen: (profile: 
     child: "ENROLADO POR TI",
     sibling: "MISMA RAMA",
     grandchild: "SIGUIENTE GENERACIÓN",
+    related: point.label?.toUpperCase() || "RELACIÓN",
   };
   const style = {
     "--node-left": `calc(50% + ${point.x}px)`,
@@ -1417,8 +1594,8 @@ function CohortGalaxy({
   );
 }
 
-function Connections({ profile, profiles, onOpen, onAdd }: { profile: Profile; profiles: Profile[]; onOpen: (profile: Profile) => void; onAdd: () => void }) {
-  const network = useMemo(() => buildLivingNetwork(profile, profiles), [profile, profiles]);
+function Connections({ profile, profiles, relationships, onOpen, onAdd }: { profile: Profile; profiles: Profile[]; relationships: ProfileRelationship[]; onOpen: (profile: Profile) => void; onAdd: () => void }) {
+  const network = useMemo(() => buildLivingNetwork(profile, profiles, relationships), [profile, profiles, relationships]);
   const cohortGroups = useMemo(() => buildCohortGroups(profiles), [profiles]);
   const [networkMode, setNetworkMode] = useState<"lineage" | "cohorts">("cohorts");
   const [selectedCohort, setSelectedCohort] = useState<string | null>(null);
@@ -1490,14 +1667,14 @@ function Connections({ profile, profiles, onOpen, onAdd }: { profile: Profile; p
 
         <header className="living-header">
           <div>
-            <span className="living-kicker"><Sparkles size={13} /> {networkMode === "lineage" ? "TU CONSTELACIÓN" : "NUESTRA COMUNIDAD"}</span>
-            <h1>{networkMode === "lineage" ? <>Tu árbol está <em>vivo.</em></> : <><em>{profiles.length} personas</em>, {cohortGroups.length} promociones.</>}</h1>
-            <p>{networkMode === "lineage" ? "Arrastra para explorar · usa la rueda para acercarte · selecciona una persona para conocer su historia." : "Arrastra para recorrer los Limas · usa la rueda para acercar o alejar · las flechas muestran quién enroló a quién."}</p>
+            <span className="living-kicker"><Sparkles size={13} /> {networkMode === "lineage" ? "TUS VÍNCULOS" : "NUESTRA COMUNIDAD"}</span>
+            <h1>{networkMode === "lineage" ? <>Tu red está <em>viva.</em></> : <><em>{profiles.length} personas</em>, {cohortGroups.length} promociones.</>}</h1>
+            <p>{networkMode === "lineage" ? "Explora tus vínculos de familia, amistad, pareja y enrolamiento." : "Arrastra para recorrer los Limas · usa la rueda para acercar o alejar · las flechas muestran quién enroló a quién."}</p>
             <div className="network-mode-switch" role="group" aria-label="Agrupar conexiones">
-              <button type="button" className={networkMode === "lineage" ? "active" : ""} onClick={() => changeMode("lineage")}><Network size={14} /> Mi linaje</button>
+              <button type="button" className={networkMode === "lineage" ? "active" : ""} onClick={() => changeMode("lineage")}><Network size={14} /> Mis vínculos</button>
               <button type="button" className={networkMode === "cohorts" ? "active" : ""} onClick={() => changeMode("cohorts")}><Users size={14} /> Por promociones <span>{cohortGroups.length}</span></button>
             </div>
-            <button className="add-connection-button" type="button" onClick={onAdd}><Plus size={16} /> Agregar conexión</button>
+            <button className="add-connection-button" type="button" onClick={onAdd}><Plus size={16} /> Agregar relación</button>
           </div>
           <div className="living-count"><strong>{networkMode === "lineage" ? network.points.length : profiles.length}</strong><span>personas en<br />{networkMode === "lineage" ? "tu linaje" : "la comunidad"}</span></div>
         </header>
@@ -1547,14 +1724,16 @@ function Connections({ profile, profiles, onOpen, onAdd }: { profile: Profile; p
           <span><i className="legend-sage" /> {networkMode === "lineage" ? "Rama extendida" : "Conexión entre Limas"}</span>
           <span className="drag-hint"><Move size={13} /> Arrastra el lienzo · rueda para zoom</span>
         </div>
+        <button className="mobile-add-connection-button" type="button" onClick={onAdd}><Plus size={18} /><span>Nueva relación</span></button>
       </section>
     </div>
   );
 }
 
-function MyProfile({ profile, profiles, onEdit, onOpen, onDeleteRequest }: { profile: Profile; profiles: Profile[]; onEdit: () => void; onOpen: (profile: Profile) => void; onDeleteRequest?: () => void }) {
+function MyProfile({ profile, profiles, relationships, onEdit, onOpen, onDeleteRequest }: { profile: Profile; profiles: Profile[]; relationships: ProfileRelationship[]; onEdit: () => void; onOpen: (profile: Profile) => void; onDeleteRequest?: () => void }) {
   const mentor = profiles.find((person) => person.id === profile.enrolled_by_id);
   const enrolled = profiles.filter((person) => person.enrolled_by_id === profile.id);
+  const personalRelationships = relationshipsForProfile(profile.id, profiles, relationships);
   return (
     <div className="my-profile page-enter">
       <div className="profile-cover"><CoverMedia profile={profile} /><div className="profile-cover-actions"><button className="preview-profile-button" onClick={() => onOpen(profile)}><Eye size={17} /> Preview</button><button className="edit-profile-button" onClick={onEdit}><UserRoundPen size={17} /> Editar perfil</button></div></div>
@@ -1564,7 +1743,7 @@ function MyProfile({ profile, profiles, onEdit, onOpen, onDeleteRequest }: { pro
       </div>
       <div className="profile-content-grid">
         <section className="section-card profile-about"><span className="section-label">SOBRE MÍ</span><h2>Mi historia</h2><p>{profile.bio || "Aún no has agregado una descripción."}</p><div className="profile-detail-list">{profile.hobbies && <span><Heart size={15} /> {profile.hobbies}</span>}{profile.address && <span><MapPin size={15} /> {profile.address}</span>}{profile.stretching && <span><Sparkles size={15} /> Estiramiento: {profile.stretching}</span>}</div><div className="profile-social-links">{profile.phone && <a href={`tel:${profile.phone}`}><Phone size={16} /> {profile.phone}</a>}{profile.facebook_url && <a href={profile.facebook_url} target="_blank" rel="noreferrer"><Link2 size={16} /> Facebook <ArrowUpRight size={15} /></a>}{profile.linkedin_url && <a href={profile.linkedin_url} target="_blank" rel="noreferrer"><Link2 size={16} /> Perfil profesional <ArrowUpRight size={15} /></a>}{profile.instagram_url && <a href={profile.instagram_url} target="_blank" rel="noreferrer"><AtSign size={16} /> Instagram <ArrowUpRight size={15} /></a>}</div></section>
-        <section className="section-card profile-links"><span className="section-label">CONEXIONES</span><h2>Mi nexo</h2>{mentor && <ConnectionListItem label="Me enroló" profile={mentor} onClick={() => onOpen(mentor)} />}{enrolled.map((person) => <ConnectionListItem key={person.id} label="Enrolado por mí" profile={person} onClick={() => onOpen(person)} />)}</section>
+        <section className="section-card profile-links"><span className="section-label">CONEXIONES</span><h2>Mis vínculos</h2>{mentor && <ConnectionListItem label="Me enroló" profile={mentor} onClick={() => onOpen(mentor)} />}{enrolled.map((person) => <ConnectionListItem key={person.id} label="Enrolado por mí" profile={person} onClick={() => onOpen(person)} />)}{personalRelationships.map((relationship) => <ConnectionListItem key={`relationship-${relationship.id}`} label={relationship.label} profile={relationship.profile} onClick={() => onOpen(relationship.profile)} />)}{!mentor && !enrolled.length && !personalRelationships.length && <p className="muted-copy">Todavía no has agregado relaciones.</p>}</section>
       </div>
       {onDeleteRequest && <section className="account-danger-zone"><div><span className="section-label">CUENTA</span><h2>Eliminar mi cuenta</h2><p>Esta acción elimina permanentemente tu perfil, tus datos públicos y tu acceso a Nexo.</p></div><button type="button" onClick={onDeleteRequest}><Trash2 size={17} /> Eliminar cuenta</button></section>}
     </div>
@@ -1608,9 +1787,10 @@ function ConnectionListItem({ label, profile, onClick }: { label: string; profil
   return <button className="connection-list-item" onClick={onClick}><Avatar profile={profile} size="small" /><div><span>{label}</span><strong>{profile.full_name}</strong></div><ChevronRight size={17} /></button>;
 }
 
-function ProfilePanel({ profile, profiles, isOwn, onClose, onOpen, onEdit }: { profile: Profile; profiles: Profile[]; isOwn: boolean; onClose: () => void; onOpen: (profile: Profile) => void; onEdit: () => void }) {
+function ProfilePanel({ profile, profiles, relationships, isOwn, onClose, onOpen, onEdit }: { profile: Profile; profiles: Profile[]; relationships: ProfileRelationship[]; isOwn: boolean; onClose: () => void; onOpen: (profile: Profile) => void; onEdit: () => void }) {
   const mentor = profiles.find((person) => person.id === profile.enrolled_by_id);
   const enrolled = profiles.filter((person) => person.enrolled_by_id === profile.id);
+  const personalRelationships = relationshipsForProfile(profile.id, profiles, relationships);
   return (
     <div className="overlay" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}>
       <aside className="profile-panel" role="dialog" aria-modal="true" aria-label={`Perfil de ${profile.full_name}`}>
@@ -1626,7 +1806,7 @@ function ProfilePanel({ profile, profiles, isOwn, onClose, onOpen, onEdit }: { p
           {profile.facebook_url && <a className="panel-link" href={profile.facebook_url} target="_blank" rel="noreferrer"><Link2 size={16} /> Ver Facebook <ArrowUpRight size={15} /></a>}
           {profile.linkedin_url && <a className="panel-link" href={profile.linkedin_url} target="_blank" rel="noreferrer"><Link2 size={16} /> Ver perfil profesional <ArrowUpRight size={15} /></a>}
           {profile.instagram_url && <a className="panel-link" href={profile.instagram_url} target="_blank" rel="noreferrer"><AtSign size={16} /> Ver Instagram <ArrowUpRight size={15} /></a>}
-          <div className="panel-connections"><div className="section-heading"><div><span className="section-label">CONEXIONES</span><h3>Su nexo</h3></div><Network size={20} /></div>{mentor && <ConnectionListItem label="Le enroló" profile={mentor} onClick={() => onOpen(mentor)} />}{enrolled.map((person) => <ConnectionListItem key={person.id} label="Enrolado por esta persona" profile={person} onClick={() => onOpen(person)} />)}{!mentor && !enrolled.length && <p className="muted-copy">Todavía no tiene conexiones registradas.</p>}</div>
+          <div className="panel-connections"><div className="section-heading"><div><span className="section-label">CONEXIONES</span><h3>Sus vínculos</h3></div><Network size={20} /></div>{mentor && <ConnectionListItem label="Le enroló" profile={mentor} onClick={() => onOpen(mentor)} />}{enrolled.map((person) => <ConnectionListItem key={person.id} label="Enrolado por esta persona" profile={person} onClick={() => onOpen(person)} />)}{personalRelationships.map((relationship) => <ConnectionListItem key={`relationship-${relationship.id}`} label={relationship.label} profile={relationship.profile} onClick={() => onOpen(relationship.profile)} />)}{!mentor && !enrolled.length && !personalRelationships.length && <p className="muted-copy">Todavía no tiene conexiones registradas.</p>}</div>
           {isOwn && <button className="primary-button full-button" onClick={onEdit}><UserRoundPen size={17} /> Editar mi perfil</button>}
         </div>
       </aside>
@@ -1858,16 +2038,20 @@ function ConnectionEditor({
   profile: Profile;
   profiles: Profile[];
   onClose: () => void;
-  onSave: (enrollerId: string, enrolleeId: string) => Promise<void>;
+  onSave: (personId: string, connectionType: ConnectionType, customLabel: string | null) => Promise<void>;
 }) {
-  const [direction, setDirection] = useState<"i_enrolled" | "enrolled_me">("i_enrolled");
+  const [connectionType, setConnectionType] = useState<ConnectionType | "">("");
   const [personId, setPersonId] = useState<string | null>(null);
+  const [customLabel, setCustomLabel] = useState("");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const selectedPerson = profiles.find((person) => person.id === personId);
-  const previousEnroller = direction === "i_enrolled"
+  const isEnrollment = connectionType === "i_enrolled" || connectionType === "enrolled_me";
+  const previousEnroller = connectionType === "i_enrolled"
     ? profiles.find((person) => person.id === selectedPerson?.enrolled_by_id)
-    : profiles.find((person) => person.id === profile.enrolled_by_id);
+    : connectionType === "enrolled_me"
+      ? profiles.find((person) => person.id === profile.enrolled_by_id)
+      : undefined;
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -1877,55 +2061,81 @@ function ConnectionEditor({
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [onClose, saving]);
 
-  const chooseDirection = (next: "i_enrolled" | "enrolled_me") => {
-    setDirection(next);
-    setPersonId(next === "enrolled_me" ? profile.enrolled_by_id : null);
+  const chooseType = (next: ConnectionType | "") => {
+    setConnectionType(next);
+    if (next === "enrolled_me" && !personId) setPersonId(profile.enrolled_by_id);
+    if (next !== "other") setCustomLabel("");
     setMessage(null);
   };
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (!personId) {
-      setMessage("Selecciona a la persona que forma parte de esta conexión.");
+      setMessage("Selecciona a la persona que forma parte de esta relación.");
+      return;
+    }
+    if (!connectionType) {
+      setMessage("Selecciona el tipo de relación.");
+      return;
+    }
+    if (connectionType === "other" && customLabel.trim().length < 2) {
+      setMessage("Escribe cómo quieres llamar a esta relación.");
       return;
     }
     setSaving(true);
     setMessage(null);
-    const enrollerId = direction === "i_enrolled" ? profile.id : personId;
-    const enrolleeId = direction === "i_enrolled" ? personId : profile.id;
     try {
-      await onSave(enrollerId, enrolleeId);
+      await onSave(personId, connectionType, connectionType === "other" ? customLabel.trim() : null);
     } catch {
-      setMessage("No pudimos guardar la conexión. Inténtalo nuevamente.");
+      setMessage("No pudimos guardar la relación. Inténtalo nuevamente.");
       setSaving(false);
     }
   };
 
   return (
-    <div className="overlay editor-overlay connection-editor-overlay" role="presentation">
+    <div className="overlay editor-overlay connection-editor-overlay" role="presentation" onMouseDown={(event) => { if (!saving && event.currentTarget === event.target) onClose(); }}>
       <section className="profile-editor connection-editor" role="dialog" aria-modal="true" aria-labelledby="connection-editor-title">
         <header>
-          <div><span className="section-label">TU RED</span><h2 id="connection-editor-title">Agregar una conexión</h2><p>Registra cómo se creó este vínculo de enrolamiento.</p></div>
-          <button className="close-button" type="button" onClick={onClose} aria-label="Cerrar modal"><X /></button>
+          <div><span className="section-label">TU RED</span><h2 id="connection-editor-title">Agregar una relación</h2><p>Conecta a una persona y cuenta qué vínculo los une.</p></div>
+          <button className="close-button" type="button" onClick={onClose} disabled={saving} aria-label="Cerrar modal"><X /></button>
         </header>
         <form onSubmit={submit}>
-          <div className="connection-direction" role="radiogroup" aria-label="Tipo de conexión">
-            <button type="button" role="radio" aria-checked={direction === "i_enrolled"} className={direction === "i_enrolled" ? "active" : ""} onClick={() => chooseDirection("i_enrolled")}>
-              <span><ArrowRight size={18} /></span><strong>Yo enrolé a alguien</strong><small>La persona quedará conectada directamente debajo de ti.</small>
-            </button>
-            <button type="button" role="radio" aria-checked={direction === "enrolled_me"} className={direction === "enrolled_me" ? "active" : ""} onClick={() => chooseDirection("enrolled_me")}>
-              <span><ArrowRight size={18} /></span><strong>Alguien me enroló</strong><small>La persona seleccionada aparecerá como quien te sumó a la red.</small>
-            </button>
-          </div>
           <div className="field connection-person-picker">
-            <span>{direction === "i_enrolled" ? "¿A quién enrolaste?" : "¿Quién te enroló?"}</span>
+            <span>¿Con quién tienes esta relación? <b>*</b></span>
             <ProfilePicker profiles={profiles} profileId={profile.id} value={personId} onChange={setPersonId} />
           </div>
-          {previousEnroller && personId && previousEnroller.id !== (direction === "i_enrolled" ? profile.id : personId) && (
+          <label className="field connection-type-field">
+            <span>¿Qué relación tiene contigo? <b>*</b></span>
+            <select value={connectionType} onChange={(event) => chooseType(event.target.value as ConnectionType | "")}>
+              <option value="">Selecciona una relación</option>
+              <optgroup label="Familia, pareja y amistad">
+                {RELATIONSHIP_OPTIONS.slice(0, 7).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </optgroup>
+              <optgroup label="Trabajo y acompañamiento">
+                {RELATIONSHIP_OPTIONS.slice(7, 11).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </optgroup>
+              <optgroup label="Comunidad Nexo">
+                <option value="i_enrolled">Yo enrolé a esta persona</option>
+                <option value="enrolled_me">Esta persona me enroló</option>
+              </optgroup>
+              <optgroup label="Personalizada">
+                {RELATIONSHIP_OPTIONS.slice(11).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </optgroup>
+            </select>
+          </label>
+          {connectionType === "other" && (
+            <label className="field connection-custom-field">
+              <span>Nombre de la relación <b>*</b></span>
+              <input value={customLabel} onChange={(event) => setCustomLabel(event.target.value)} maxLength={60} placeholder="Ej. Vecino, padrino, socio…" />
+              <small>{customLabel.length}/60</small>
+            </label>
+          )}
+          {isEnrollment && <p className="connection-type-note"><Network size={15} /> Esta relación también definirá la posición en el árbol de enrolamiento.</p>}
+          {previousEnroller && personId && previousEnroller.id !== (connectionType === "i_enrolled" ? profile.id : personId) && (
             <p className="connection-replacement-note"><AlertTriangle size={15} /> Esta acción reemplazará la conexión actual con {previousEnroller.full_name}.</p>
           )}
           {message && <p className="form-message">{message}</p>}
-          <footer><button className="ghost-button" type="button" onClick={onClose}>Cancelar</button><button className="primary-button" type="submit" disabled={saving || !personId}><Network size={17} /> {saving ? "Guardando..." : "Guardar conexión"}</button></footer>
+          <footer><button className="ghost-button" type="button" onClick={onClose} disabled={saving}>Cancelar</button><button className="primary-button" type="submit" disabled={saving || !personId || !connectionType || (connectionType === "other" && customLabel.trim().length < 2)}><Network size={17} /> {saving ? "Guardando..." : "Guardar relación"}</button></footer>
         </form>
       </section>
     </div>

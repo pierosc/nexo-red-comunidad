@@ -7,7 +7,7 @@ Nexo es una red privada de comunidad construida con React, Clerk y Supabase. Cad
 - Autenticación con Clerk mediante modal de inicio de sesión.
 - Directorio con búsqueda y filtros por promoción.
 - Perfiles con foto por URL, biografía, profesión, ciudad, país y fecha de nacimiento.
-- Relación visual entre la persona que te enroló y las personas enroladas por ti.
+- Relaciones de enrolamiento, familia, pareja, amistad, promoción, trabajo, mentoría y vínculos personalizados.
 - Edición del perfil propio con datos persistidos en Supabase.
 - Políticas RLS para que todos los miembros autenticados puedan leer perfiles y cada usuario solo pueda modificar el suyo.
 - Directorio limpio: solo muestra perfiles reales guardados en Supabase.
@@ -17,7 +17,7 @@ Nexo es una red privada de comunidad construida con React, Clerk y Supabase. Cad
 1. Crea un proyecto en Clerk y otro en Supabase.
 2. En Clerk, usa **Connect with Supabase** para habilitar la integración de autenticación de terceros.
 3. En Supabase, agrega Clerk en **Authentication → Third-Party Auth**.
-4. Ejecuta `supabase/migrations/202608080001_create_profiles.sql` en el SQL Editor de Supabase.
+4. Ejecuta, en orden, los archivos de `supabase/migrations` en el SQL Editor de Supabase.
 5. Copia `.env.example` como `.env.local` y reemplaza los tres valores.
 6. Ejecuta `npm install` y luego `npm run dev`.
 
