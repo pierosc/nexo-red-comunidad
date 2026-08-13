@@ -14,6 +14,7 @@ import {
   ArrowUpRight,
   AlertTriangle,
   AtSign,
+  Bell,
   BookOpen,
   CalendarDays,
   Camera,
@@ -29,6 +30,7 @@ import {
   Link2,
   LocateFixed,
   MapPin,
+  MessageCircle,
   Minus,
   Moon,
   Move,
@@ -40,6 +42,7 @@ import {
   Plus,
   Save,
   Search,
+  Send,
   ShieldCheck,
   Sparkles,
   Sun,
@@ -61,7 +64,7 @@ import {
 
 type View = "home" | "directory" | "connections" | "profile";
 
-const APP_VERSION = "1.0.35";
+const APP_VERSION = "1.1.0";
 const EASTER_EGG_EVENT = "nexo:val-easter-egg";
 
 const valParticles = Array.from({ length: 18 }, (_, index) => ({
@@ -762,7 +765,165 @@ function useProfiles(userId: string, config: NexoConfig, getToken?: () => Promis
     setProfiles((previous) => previous.filter((profile) => profile.clerk_user_id !== userId));
   }, [client, userId]);
 
-  return { profiles, relationships, loading, error, live, saveProfile, saveConnection, saveRelationship, deleteProfile };
+  return { profiles, relationships, loading, error, live, client, saveProfile, saveConnection, saveRelationship, deleteProfile };
+}
+
+function communityChannelKey(type: CommunityChannelType, label: string) {
+  return type === "cohort" ? normalizeCohort(label) : label.trim().replace(/\s+/g, " ").toLocaleLowerCase("es");
+}
+
+function communityChannelId(channel: Pick<CommunityChannel, "type" | "key">) {
+  return `${channel.type}:${channel.key}`;
+}
+
+function mergeCommunityMessage(messages: CommunityMessage[], message: CommunityMessage) {
+  const next = messages.some((candidate) => candidate.id === message.id)
+    ? messages.map((candidate) => candidate.id === message.id ? message : candidate)
+    : [...messages, message];
+  return next
+    .sort((first, second) => first.created_at.localeCompare(second.created_at))
+    .slice(-600);
+}
+
+function useCommunityMessages(client: SupabaseClient | null, profile: Profile | undefined) {
+  const profileId = profile?.id;
+  const [messages, setMessages] = useState<CommunityMessage[]>([]);
+  const [reads, setReads] = useState<CommunityChannelRead[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    if (!client || !profileId) {
+      setMessages([]);
+      setReads([]);
+      return;
+    }
+    setLoading(true);
+    const [messageResult, readResult] = await Promise.all([
+      client
+        .from("community_messages")
+        .select("id, channel_type, channel_key, author_profile_id, body, created_at")
+        .order("created_at", { ascending: false })
+        .limit(600),
+      client
+        .from("community_channel_reads")
+        .select("profile_id, channel_type, channel_key, last_read_at")
+        .eq("profile_id", profileId),
+    ]);
+
+    if (messageResult.error || readResult.error) {
+      setError("Las conversaciones todavía no están disponibles. Intenta nuevamente en un momento.");
+    } else {
+      setMessages(((messageResult.data as CommunityMessage[] | null) ?? []).reverse());
+      setReads((readResult.data as CommunityChannelRead[] | null) ?? []);
+      setError(null);
+    }
+    setLoading(false);
+  }, [client, profileId]);
+
+  useEffect(() => {
+    queueMicrotask(() => void refresh());
+  }, [refresh]);
+
+  useEffect(() => {
+    if (!client || !profileId) return;
+    const realtime = client
+      .channel(`community-messages-${profileId}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "community_messages" },
+        (payload) => setMessages((current) => mergeCommunityMessage(current, payload.new as CommunityMessage)),
+      )
+      .subscribe();
+    return () => { void client.removeChannel(realtime); };
+  }, [client, profileId]);
+
+  const markRead = useCallback(async (channel: CommunityChannel) => {
+    if (!client || !profileId) return;
+    const readAt = new Date().toISOString();
+    const nextRead: CommunityChannelRead = {
+      profile_id: profileId,
+      channel_type: channel.type,
+      channel_key: channel.key,
+      last_read_at: readAt,
+    };
+    setReads((current) => {
+      const exists = current.some((read) => read.channel_type === channel.type && read.channel_key === channel.key);
+      return exists
+        ? current.map((read) => read.channel_type === channel.type && read.channel_key === channel.key ? nextRead : read)
+        : [...current, nextRead];
+    });
+    const { data, error: readError } = await client.rpc("mark_community_channel_read", {
+      p_channel_type: channel.type,
+      p_channel_key: channel.key,
+    });
+    if (readError) {
+      setError("No pudimos actualizar tus notificaciones.");
+      return;
+    }
+    if (typeof data === "string") {
+      setReads((current) => current.map((read) => (
+        read.channel_type === channel.type && read.channel_key === channel.key
+          ? { ...read, last_read_at: data }
+          : read
+      )));
+    }
+  }, [client, profileId]);
+
+  const postMessage = useCallback(async (channel: CommunityChannel, body: string) => {
+    if (!client || !profileId) throw new Error("Las conversaciones requieren una conexión activa.");
+    const normalizedBody = body.trim();
+    if (!normalizedBody || normalizedBody.length > 1000) throw new Error("Escribe un mensaje de hasta 1000 caracteres.");
+    const { data, error: postError } = await client.rpc("post_community_message", {
+      p_channel_type: channel.type,
+      p_channel_key: channel.key,
+      p_body: normalizedBody,
+    });
+    if (postError) throw postError;
+    if (data) setMessages((current) => mergeCommunityMessage(current, data as CommunityMessage));
+    await markRead(channel);
+  }, [client, markRead, profileId]);
+
+  const membershipChannels = useMemo(() => {
+    if (!profileId || !profile) return [];
+    const channels: CommunityChannel[] = [];
+    if (profile.cohort) {
+      channels.push({ type: "cohort", key: communityChannelKey("cohort", profile.cohort), label: profile.cohort });
+    }
+    profileHobbies(profile).forEach((hobby) => channels.push({
+      type: "hobby",
+      key: communityChannelKey("hobby", hobby),
+      label: hobby,
+    }));
+    return channels;
+  }, [profile, profileId]);
+
+  const notifications = useMemo(() => {
+    if (!profileId) return [];
+    const memberships = new Map(membershipChannels.map((channel) => [communityChannelId(channel), channel]));
+    const readTimes = new Map(reads.map((read) => [
+      communityChannelId({ type: read.channel_type, key: read.channel_key }),
+      read.last_read_at,
+    ]));
+    const grouped = new Map<string, CommunityNotification>();
+
+    messages.forEach((message) => {
+      if (message.author_profile_id === profileId) return;
+      const id = communityChannelId({ type: message.channel_type, key: message.channel_key });
+      const channel = memberships.get(id);
+      if (!channel || message.created_at <= (readTimes.get(id) ?? "")) return;
+      const current = grouped.get(id);
+      grouped.set(id, {
+        channel,
+        count: (current?.count ?? 0) + 1,
+        latest: !current || message.created_at > current.latest.created_at ? message : current.latest,
+      });
+    });
+
+    return Array.from(grouped.values()).sort((first, second) => second.latest.created_at.localeCompare(first.latest.created_at));
+  }, [membershipChannels, messages, profileId, reads]);
+
+  return { messages, notifications, loading, error, markRead, postMessage, refresh };
 }
 
 export default function NexoApp({ config }: { config: NexoConfig }) {
@@ -960,7 +1121,7 @@ function Workspace({
   accountControl: React.ReactNode;
   onDeleteAccount?: () => Promise<void>;
 }) {
-  const { profiles, relationships, loading, error, live, saveProfile, saveConnection, saveRelationship, deleteProfile } = useProfiles(userId, config, getToken);
+  const { profiles, relationships, loading, error, live, client, saveProfile, saveConnection, saveRelationship, deleteProfile } = useProfiles(userId, config, getToken);
   const [view, setView] = useState<View>("home");
   const [query, setQuery] = useState("");
   const [cohort, setCohort] = useState("Todas");
@@ -968,6 +1129,7 @@ function Workspace({
   const [editing, setEditing] = useState(false);
   const [addingConnection, setAddingConnection] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
+  const [activeCommunityChannel, setActiveCommunityChannel] = useState<CommunityChannel | null>(null);
   const [mobileNav, setMobileNav] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [theme, setTheme] = useState<"light" | "dark">("light");
@@ -985,6 +1147,7 @@ function Workspace({
     return next;
   });
   const currentProfile = profiles.find((profile) => profile.clerk_user_id === userId);
+  const community = useCommunityMessages(client, currentProfile);
   const displayProfile = currentProfile ?? {
     id: "",
     clerk_user_id: userId,
@@ -1092,6 +1255,7 @@ function Workspace({
             <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar personas, promociones..." />
           </label>
           <div className="topbar-actions">
+            <CommunityNotificationCenter notifications={community.notifications} profiles={profiles} onOpen={setActiveCommunityChannel} />
             <button className="theme-toggle" type="button" onClick={toggleTheme} aria-label={theme === "dark" ? "Usar modo claro" : "Usar modo oscuro"} title={theme === "dark" ? "Modo claro" : "Modo oscuro"}>{theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}</button>
             <div className="account-summary">
               <div><strong>{firstName(displayProfile.full_name)}</strong><span>{displayProfile.cohort}</span></div>
@@ -1116,7 +1280,7 @@ function Workspace({
           {view === "directory" && (
             <Directory profiles={filtered} cohorts={cohorts} cohort={cohort} query={query} onQuery={setQuery} onCohort={setCohort} onOpen={setSelected} />
           )}
-          {view === "connections" && <Connections profile={displayProfile} profiles={profiles} relationships={relationships} onOpen={setSelected} onAdd={() => setAddingConnection(true)} />}
+          {view === "connections" && <Connections profile={displayProfile} profiles={profiles} relationships={relationships} onOpen={setSelected} onOpenChannel={setActiveCommunityChannel} onAdd={() => setAddingConnection(true)} />}
           {view === "profile" && (
             <MyProfile profile={displayProfile} profiles={profiles} relationships={relationships} onEdit={() => setEditing(true)} onOpen={setSelected} onDeleteRequest={onDeleteAccount ? () => setDeletingAccount(true) : undefined} />
           )}
@@ -1159,7 +1323,179 @@ function Workspace({
           }}
         />
       )}
+      {activeCommunityChannel && (
+        <CommunityChatDialog
+          channel={activeCommunityChannel}
+          profile={displayProfile}
+          profiles={profiles}
+          messages={community.messages}
+          loading={community.loading}
+          error={community.error}
+          onClose={() => setActiveCommunityChannel(null)}
+          onRead={community.markRead}
+          onSend={community.postMessage}
+        />
+      )}
       {deletingAccount && <AccountDeletionDialog onClose={() => setDeletingAccount(false)} onConfirm={removeAccount} />}
+    </div>
+  );
+}
+
+function formatCommunityTime(value: string, detailed = false) {
+  return new Intl.DateTimeFormat("es-PE", detailed
+    ? { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }
+    : { hour: "2-digit", minute: "2-digit" }
+  ).format(new Date(value));
+}
+
+function CommunityNotificationCenter({ notifications, profiles, onOpen }: {
+  notifications: CommunityNotification[];
+  profiles: Profile[];
+  onOpen: (channel: CommunityChannel) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const unreadCount = notifications.reduce((total, notification) => total + notification.count, 0);
+  const profileById = useMemo(() => new Map(profiles.map((profile) => [profile.id, profile])), [profiles]);
+
+  return (
+    <div className="community-notifications">
+      <button
+        className={`notification-button ${unreadCount ? "has-unread" : ""}`}
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        aria-label={unreadCount ? `${unreadCount} mensajes nuevos` : "Notificaciones de conversaciones"}
+        aria-expanded={open}
+      >
+        <Bell size={18} />
+        {unreadCount > 0 && <span>{unreadCount > 99 ? "99+" : unreadCount}</span>}
+      </button>
+      {open && (
+        <div className="notification-popover">
+          <header><div><span>CONVERSACIONES</span><strong>Mensajes nuevos</strong></div><Bell size={18} /></header>
+          {notifications.length ? (
+            <div className="notification-list">
+              {notifications.map((notification) => {
+                const author = profileById.get(notification.latest.author_profile_id);
+                return (
+                  <button
+                    type="button"
+                    key={communityChannelId(notification.channel)}
+                    onClick={() => { setOpen(false); onOpen(notification.channel); }}
+                  >
+                    <span className={`notification-channel-icon is-${notification.channel.type}`}><MessageCircle size={15} /></span>
+                    <span><strong>{notification.channel.label}</strong><small>{author ? firstName(author.full_name) : "Alguien"}: {notification.latest.body}</small></span>
+                    <i>{notification.count}</i>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="notification-empty"><Check size={18} /><span>Estás al día</span><small>Te avisaremos cuando escriban en tu Lima o tus hobbies.</small></div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CommunityChatDialog({ channel, profile, profiles, messages, loading, error, onClose, onRead, onSend }: {
+  channel: CommunityChannel;
+  profile: Profile;
+  profiles: Profile[];
+  messages: CommunityMessage[];
+  loading: boolean;
+  error: string | null;
+  onClose: () => void;
+  onRead: (channel: CommunityChannel) => Promise<void>;
+  onSend: (channel: CommunityChannel, body: string) => Promise<void>;
+}) {
+  const [draft, setDraft] = useState("");
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const messageListRef = useRef<HTMLDivElement>(null);
+  const profileById = useMemo(() => new Map(profiles.map((person) => [person.id, person])), [profiles]);
+  const channelMessages = useMemo(() => messages.filter((message) => (
+    message.channel_type === channel.type && message.channel_key === channel.key
+  )), [channel.key, channel.type, messages]);
+  const latestMessageId = channelMessages.at(-1)?.id;
+
+  useEffect(() => {
+    void onRead(channel);
+  }, [channel, latestMessageId, onRead]);
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      const list = messageListRef.current;
+      if (list) list.scrollTop = list.scrollHeight;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [channelMessages.length]);
+
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
+
+  const submit = async (event?: FormEvent) => {
+    event?.preventDefault();
+    if (!draft.trim() || sending) return;
+    setSending(true);
+    setSendError(null);
+    try {
+      await onSend(channel, draft);
+      setDraft("");
+    } catch {
+      setSendError("No pudimos enviar el mensaje. Intenta nuevamente.");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="community-chat-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <section className="community-chat-dialog" role="dialog" aria-modal="true" aria-labelledby="community-chat-title">
+        <header>
+          <span className={`community-chat-hero-icon is-${channel.type}`}><MessageCircle /></span>
+          <div><span>{channel.type === "cohort" ? "CHAT DE PROMOCIÓN" : "CHAT DE HOBBY"}</span><h2 id="community-chat-title">{channel.label}</h2><p>{channel.memberCount ? `${channel.memberCount} ${channel.memberCount === 1 ? "persona" : "personas"} en este círculo` : "Conversación de tu comunidad"}</p></div>
+          <button className="community-chat-close" type="button" onClick={onClose} aria-label="Cerrar conversación"><X /></button>
+        </header>
+
+        <div className="community-message-list" ref={messageListRef} aria-live="polite">
+          {loading && !channelMessages.length && <div className="community-chat-status"><span className="loading-pulse" /> Cargando conversación…</div>}
+          {!loading && !channelMessages.length && !error && <div className="community-chat-empty"><MessageCircle size={28} /><strong>Inicia la conversación</strong><span>Sé la primera persona en dejar un mensaje para {channel.label}.</span></div>}
+          {error && <div className="community-chat-error">{error}</div>}
+          {channelMessages.map((message) => {
+            const author = profileById.get(message.author_profile_id);
+            const own = message.author_profile_id === profile.id;
+            return (
+              <article className={`community-message ${own ? "is-own" : ""}`} key={message.id}>
+                {!own && (author ? <Avatar profile={author} size="small" /> : <span className="community-message-fallback"><Users size={14} /></span>)}
+                <div><span><strong>{own ? "Tú" : author?.full_name ?? "Miembro de Nexo"}</strong><time dateTime={message.created_at}>{formatCommunityTime(message.created_at)}</time></span><p>{message.body}</p></div>
+              </article>
+            );
+          })}
+        </div>
+
+        <form className="community-chat-composer" onSubmit={submit}>
+          <textarea
+            value={draft}
+            onChange={(event) => setDraft(event.target.value.slice(0, 1000))}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                void submit();
+              }
+            }}
+            placeholder={`Escribe en ${channel.label}…`}
+            aria-label={`Mensaje para ${channel.label}`}
+            rows={2}
+            disabled={sending || Boolean(error)}
+          />
+          <button type="submit" disabled={sending || !draft.trim() || Boolean(error)} aria-label="Enviar mensaje"><Send size={17} /></button>
+          <small>{sendError ?? `${draft.length}/1000 · Enter para enviar`}</small>
+        </form>
+      </section>
     </div>
   );
 }
@@ -1357,6 +1693,37 @@ type NetworkEdge = {
   from: NetworkPoint;
   to: NetworkPoint;
   tone: "primary" | "secondary";
+};
+
+type CommunityChannelType = "cohort" | "hobby";
+
+type CommunityChannel = {
+  type: CommunityChannelType;
+  key: string;
+  label: string;
+  memberCount?: number;
+};
+
+type CommunityMessage = {
+  id: string;
+  channel_type: CommunityChannelType;
+  channel_key: string;
+  author_profile_id: string;
+  body: string;
+  created_at: string;
+};
+
+type CommunityChannelRead = {
+  profile_id: string;
+  channel_type: CommunityChannelType;
+  channel_key: string;
+  last_read_at: string;
+};
+
+type CommunityNotification = {
+  channel: CommunityChannel;
+  count: number;
+  latest: CommunityMessage;
 };
 
 function networkRelationLabel(relation: NetworkRelation) {
@@ -1687,6 +2054,7 @@ function CohortGalaxy({
   selectedCohort,
   onSelectCohort,
   onCenterCohort,
+  onOpenChannel,
   onOpen,
   hobbyFilter,
   emptyTitle,
@@ -1698,6 +2066,7 @@ function CohortGalaxy({
   selectedCohort: string | null;
   onSelectCohort: (cohort: string | null) => void;
   onCenterCohort: (target: CohortFocusTarget) => void;
+  onOpenChannel: (channel: CommunityChannel) => void;
   onOpen: (profile: Profile) => void;
   hobbyFilter?: string[];
   emptyTitle?: string;
@@ -1883,10 +2252,25 @@ function CohortGalaxy({
                 aria-label={`${group.cohort}, ${group.members.length} personas`}
               >
                 {groupIndex === 0 && <span className="cohort-latest-badge"><Sparkles size={12} /> {groupMode === "cohorts" ? "Lima más actual" : "Hobby más compartido"}</span>}
-                <button className={`cohort-stack-center ${groupMode === "hobbies" ? "is-hobby" : ""}`} type="button" onClick={() => onSelectCohort(selected ? null : group.cohort)}>
+                <button
+                  className={`cohort-stack-center ${groupMode === "hobbies" ? "is-hobby" : ""}`}
+                  type="button"
+                  onClick={() => {
+                    onSelectCohort(group.cohort);
+                    onOpenChannel({
+                      type: groupMode === "cohorts" ? "cohort" : "hobby",
+                      key: communityChannelKey(groupMode === "cohorts" ? "cohort" : "hobby", group.cohort),
+                      label: group.cohort,
+                      memberCount: group.members.length,
+                    });
+                  }}
+                  aria-label={`Abrir conversación de ${group.cohort}`}
+                >
+                  <span className="cohort-chat-badge"><MessageCircle size={13} /></span>
                   <span>{groupMode === "cohorts" ? "Promoción" : "Hobby"}</span>
                   <strong>{group.cohort}</strong>
                   <small>{group.members.length} {group.members.length === 1 ? "persona" : "personas"}</small>
+                  <span className="cohort-chat-label">Abrir chat</span>
                 </button>
                 <div className="cohort-members-grid">
                   {group.members.map((member, memberIndex) => (
@@ -1922,7 +2306,7 @@ function CohortGalaxy({
   );
 }
 
-function Connections({ profile, profiles, relationships, onOpen, onAdd }: { profile: Profile; profiles: Profile[]; relationships: ProfileRelationship[]; onOpen: (profile: Profile) => void; onAdd: () => void }) {
+function Connections({ profile, profiles, relationships, onOpen, onOpenChannel, onAdd }: { profile: Profile; profiles: Profile[]; relationships: ProfileRelationship[]; onOpen: (profile: Profile) => void; onOpenChannel: (channel: CommunityChannel) => void; onAdd: () => void }) {
   const network = useMemo(() => buildLivingNetwork(profile, profiles, relationships), [profile, profiles, relationships]);
   const cohortGroups = useMemo(() => buildCohortGroups(profiles), [profiles]);
   const hobbyGroups = useMemo(() => buildHobbyGroups(profiles), [profiles]);
@@ -2101,6 +2485,7 @@ function Connections({ profile, profiles, relationships, onOpen, onAdd }: { prof
             selectedCohort={selectedCohort}
             onSelectCohort={setSelectedCohort}
             onCenterCohort={centerCohort}
+            onOpenChannel={onOpenChannel}
             onOpen={onOpen}
             emptyTitle={networkMode === "my_hobbies" ? "Aún no encontramos coincidencias" : undefined}
             emptyCopy={networkMode === "my_hobbies" ? "Agrega tus hobbies al perfil o vuelve más tarde cuando haya nuevas personas." : undefined}
