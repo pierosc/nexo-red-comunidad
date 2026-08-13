@@ -61,7 +61,7 @@ import {
 
 type View = "home" | "directory" | "connections" | "profile";
 
-const APP_VERSION = "1.0.34";
+const APP_VERSION = "1.0.35";
 const EASTER_EGG_EVENT = "nexo:val-easter-egg";
 
 const valParticles = Array.from({ length: 18 }, (_, index) => ({
@@ -1685,8 +1685,6 @@ function CohortGalaxy({
   relationships,
   groupMode,
   selectedCohort,
-  pan,
-  zoom,
   onSelectCohort,
   onCenterCohort,
   onOpen,
@@ -1698,8 +1696,6 @@ function CohortGalaxy({
   relationships: ProfileRelationship[];
   groupMode: "cohorts" | "hobbies";
   selectedCohort: string | null;
-  pan: { x: number; y: number };
-  zoom: number;
   onSelectCohort: (cohort: string | null) => void;
   onCenterCohort: (target: CohortFocusTarget) => void;
   onOpen: (profile: Profile) => void;
@@ -1789,13 +1785,11 @@ function CohortGalaxy({
     const observer = new ResizeObserver(scheduleMeasurement);
     observer.observe(stack);
     window.addEventListener("resize", scheduleMeasurement);
-    stack.addEventListener("animationend", scheduleMeasurement, true);
     scheduleMeasurement();
     return () => {
       cancelAnimationFrame(frame);
       observer.disconnect();
       window.removeEventListener("resize", scheduleMeasurement);
-      stack.removeEventListener("animationend", scheduleMeasurement, true);
     };
   }, [connectionPairs, groupMode, profileById]);
 
@@ -1863,11 +1857,6 @@ function CohortGalaxy({
       <div
         className="cohort-stack-scroll"
         ref={worldRef}
-        style={{
-          "--network-pan-x": `${pan.x}px`,
-          "--network-pan-y": `${pan.y}px`,
-          "--network-scale": zoom,
-        } as CSSProperties}
       >
         <div className="cohort-stack" ref={stackRef}>
           {groupMode === "cohorts" && connectionLayout.width > 0 && <svg className="cohort-connection-layer" width={connectionLayout.width} height={connectionLayout.height} viewBox={`0 0 ${connectionLayout.width} ${connectionLayout.height}`} aria-hidden="true">
@@ -1947,52 +1936,104 @@ function Connections({ profile, profiles, relationships, onOpen, onAdd }: { prof
   const [zoom, setZoom] = useState(0.82);
   const [pan, setPan] = useState({ x: 0, y: 35 });
   const [dragging, setDragging] = useState(false);
+  const [mapMoving, setMapMoving] = useState(false);
   const canvasRef = useRef<HTMLElement>(null);
   const dragRef = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
+  const panRef = useRef(pan);
+  const zoomRef = useRef(zoom);
+  const panFrameRef = useRef(0);
+  const motionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const applyPan = useCallback((nextPan: { x: number; y: number }) => {
+    panRef.current = nextPan;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    canvas.style.setProperty("--network-pan-x", `${nextPan.x}px`);
+    canvas.style.setProperty("--network-pan-y", `${nextPan.y}px`);
+  }, []);
+  const commitPan = useCallback((nextPan: { x: number; y: number }) => {
+    applyPan(nextPan);
+    setPan(nextPan);
+  }, [applyPan]);
+  const beginTransientMotion = useCallback(() => {
+    setMapMoving(true);
+    if (motionTimerRef.current) clearTimeout(motionTimerRef.current);
+    motionTimerRef.current = setTimeout(() => {
+      motionTimerRef.current = null;
+      setMapMoving(false);
+    }, 160);
+  }, []);
+
+  useEffect(() => () => {
+    cancelAnimationFrame(panFrameRef.current);
+    if (motionTimerRef.current) clearTimeout(motionTimerRef.current);
+  }, []);
 
   const resetView = () => {
+    zoomRef.current = 0.82;
     setZoom(0.82);
-    setPan({ x: 0, y: 35 });
+    commitPan({ x: 0, y: 35 });
+    beginTransientMotion();
   };
   const changeMode = (mode: "lineage" | "cohorts" | "hobbies" | "my_hobbies") => {
     setNetworkMode(mode);
     setSelectedCohort(null);
     resetView();
   };
-  const adjustZoom = (amount: number) => setZoom((current) => Math.min(1.6, Math.max(0.4, current + amount)));
+  const adjustZoom = (amount: number) => {
+    const nextZoom = Math.min(1.6, Math.max(0.4, zoomRef.current + amount));
+    zoomRef.current = nextZoom;
+    setZoom(nextZoom);
+    beginTransientMotion();
+  };
   const centerCohort = useCallback((target: CohortFocusTarget) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const compactCohortView = window.matchMedia("(max-width: 820px)").matches;
     const focusY = compactCohortView ? Math.min(220, canvas.clientHeight * 0.28) : canvas.clientHeight / 2;
-    setPan({
-      x: -zoom * (target.x - target.width / 2),
-      y: focusY - target.worldTop - zoom * target.y,
+    commitPan({
+      x: -zoomRef.current * (target.x - target.width / 2),
+      y: focusY - target.worldTop - zoomRef.current * target.y,
     });
-  }, [zoom]);
+    beginTransientMotion();
+  }, [beginTransientMotion, commitPan]);
   const handlePointerDown = (event: ReactPointerEvent<HTMLElement>) => {
     if ((event.target as HTMLElement).closest(".living-node, .cohort-stack-member, .cohort-stack-center, .cohort-search, .network-controls, .network-story-card, .network-mode-switch, .mobile-network-mode-switch, .add-connection-button, .mobile-add-connection-button")) return;
-    dragRef.current = { x: event.clientX, y: event.clientY, panX: pan.x, panY: pan.y };
+    dragRef.current = { x: event.clientX, y: event.clientY, panX: panRef.current.x, panY: panRef.current.y };
+    if (motionTimerRef.current) clearTimeout(motionTimerRef.current);
     setDragging(true);
+    setMapMoving(true);
     event.currentTarget.setPointerCapture(event.pointerId);
   };
   const handlePointerMove = (event: ReactPointerEvent<HTMLElement>) => {
     if (!dragRef.current) return;
-    setPan({
+    const nextPan = {
       x: dragRef.current.panX + event.clientX - dragRef.current.x,
       y: dragRef.current.panY + event.clientY - dragRef.current.y,
-    });
+    };
+    panRef.current = nextPan;
+    cancelAnimationFrame(panFrameRef.current);
+    panFrameRef.current = requestAnimationFrame(() => applyPan(nextPan));
   };
   const endDrag = () => {
+    if (!dragRef.current) return;
     dragRef.current = null;
+    cancelAnimationFrame(panFrameRef.current);
+    commitPan(panRef.current);
     setDragging(false);
+    setMapMoving(false);
   };
 
   return (
     <div className="connections-page living-connections page-enter">
       <section
         ref={canvasRef}
-        className={`living-canvas ${dragging ? "is-dragging" : ""} ${networkMode !== "lineage" ? "is-cohort-mode" : ""}`}
+        className={`living-canvas ${dragging ? "is-dragging" : ""} ${mapMoving ? "is-moving" : ""} ${profiles.length >= 40 ? "is-dense-network" : ""} ${networkMode !== "lineage" ? "is-cohort-mode" : ""}`}
+        style={{
+          "--network-pan-x": `${pan.x}px`,
+          "--network-pan-y": `${pan.y}px`,
+          "--network-scale": zoom,
+        } as CSSProperties}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={endDrag}
@@ -2041,11 +2082,6 @@ function Connections({ profile, profiles, relationships, onOpen, onAdd }: { prof
         {networkMode === "lineage" ? (
           <div
             className="living-world"
-            style={{
-              "--network-pan-x": `${pan.x}px`,
-              "--network-pan-y": `${pan.y}px`,
-              "--network-scale": zoom,
-            } as CSSProperties}
           >
             <>
               <div className="world-orbit orbit-one" />
@@ -2063,8 +2099,6 @@ function Connections({ profile, profiles, relationships, onOpen, onAdd }: { prof
             groupMode={networkMode === "cohorts" ? "cohorts" : "hobbies"}
             hobbyFilter={networkMode === "my_hobbies" ? myHobbies : undefined}
             selectedCohort={selectedCohort}
-            pan={pan}
-            zoom={zoom}
             onSelectCohort={setSelectedCohort}
             onCenterCohort={centerCohort}
             onOpen={onOpen}
